@@ -9,10 +9,32 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Union
 
 import chromadb
-import pyghidra  # noqa
+import click
 from chromadb.config import Settings
 
 from pyghidra_mcp.tools import GhidraTools
+
+
+def check_directory_writeability(directory: Path, directory_type: str = "directory") -> None:
+    """Check if directory is writeable and raise clear error if not."""
+    try:
+        # Ensure parent directory exists for writeability test
+        directory.mkdir(parents=True, exist_ok=True)
+
+        # Test writeability by attempting to create a temporary file
+        test_file = directory / ".writeability_test"
+        test_file.touch()
+        test_file.unlink()
+    except (OSError, PermissionError) as e:
+        raise click.ClickException(
+            f"Cannot write to {directory_type} directory: {directory}. "
+            f"Please check permissions and ensure directory exists and is writeable."
+        ) from e
+    except Exception as e:
+        raise click.ClickException(
+            f"Unexpected error checking {directory_type} directory: {directory}. Error: {e!s}"
+        ) from e
+
 
 if TYPE_CHECKING:
     from ghidra.app.decompiler import DecompInterface
@@ -56,6 +78,7 @@ class PyGhidraContext:
         self,
         project_name: str,
         project_path: str | Path,
+        pyghidra_mcp_dir: Path | None = None,
         force_analysis: bool = False,
         verbose_analysis: bool = False,
         no_symbols: bool = False,
@@ -91,8 +114,16 @@ class PyGhidraContext:
         self.programs: dict[str, ProgramInfo] = {}
         self._init_project_programs()
 
-        project_dir = self.project_path / self.project_name
-        chromadb_path = project_dir / "chromadb"
+        # Use provided pyghidra-mcp directory or create default
+        if pyghidra_mcp_dir:
+            self.pyghidra_mcp_dir = pyghidra_mcp_dir
+        else:
+            # Default: create pyghidra-mcp directory alongside project
+            self.pyghidra_mcp_dir = self.project_path / "pyghidra-mcp"
+
+        chromadb_path = self.pyghidra_mcp_dir / "chromadb"
+        check_directory_writeability(chromadb_path.parent, "ChromaDB parent directory")
+        chromadb_path.mkdir(parents=True, exist_ok=True)
         self.chroma_client = chromadb.PersistentClient(
             path=str(chromadb_path), settings=Settings(anonymized_telemetry=False)
         )
@@ -103,8 +134,9 @@ class PyGhidraContext:
         self.no_symbols = no_symbols
         self.gdts = gdts if gdts is not None else []
         self.program_options = program_options
-        self.gzfs_path = Path(gzfs_path) if gzfs_path else self.project_path / "gzfs"
+        self.gzfs_path = Path(gzfs_path) if gzfs_path else self.pyghidra_mcp_dir / "gzfs"
         if self.gzfs_path:
+            check_directory_writeability(self.gzfs_path.parent, "GZFS parent directory")
             self.gzfs_path.mkdir(exist_ok=True, parents=True)
 
         self.threaded = threaded
@@ -152,7 +184,8 @@ class PyGhidraContext:
         from ghidra.base.project import GhidraProject
         from ghidra.framework.model import ProjectLocator
 
-        project_dir = self.project_path / self.project_name
+        # For standard Ghidra projects, use directory containing .gpr file
+        project_dir = self.project_path
         project_dir.mkdir(exist_ok=True, parents=True)
         project_dir_str = str(project_dir.absolute())
 
@@ -362,28 +395,48 @@ class PyGhidraContext:
                 logger.error(f"Failed to import {bin_path}: {e}")
                 # continue importing remaining files
 
-    @staticmethod
-    def _is_binary_file(path: Path) -> bool:
-        """
-        Quick header-based check for common binary formats.
-        Recognizes ELF (0x7f 'ELF') and PE ('MZ' DOS header) signatures.
-        Returns False on read errors or unknown signatures.
-        """
+    def _is_binary_file(self, path: Path) -> bool:
+        # return self._detect_binary_format(path) is not None
+        return True
+
+    def _detect_binary_format(self, path: Path) -> str | None:
+        # loader = pyghidra.program_loader()
+
+        # try:
+        #     loader.source(str(path))
+        #     if loader.load() is not None:
+        #         return loader
+        # except Exception:
+        #     return None
+
+        magic_table = {
+            b"\x7fELF": "ELF",
+            b"MZ": "PE",
+            b"\xfe\xed\xfa\xce": "MachO32",
+            b"\xfe\xed\xfa\xcf": "MachO64",
+            b"\xce\xfa\xed\xfe": "MachO32_BE",
+            b"\xcf\xfa\xed\xfe": "MachO64_BE",
+            b"\xbe\xba\xfe\xca": "FatMachO_BE",
+            b"\x00asm": "WASM",
+            b"dex\n": "DEX",
+            b"oat\n": "OAT",
+            b"art\n": "ART",
+            b"\xca\xfe\xba\xbe": "JavaClass_or_FatMachO",
+            b"!<ar": "Archive",  # .a, .lib
+            b"PK\x03\x04": "Zip",  # JAR, APK, etc.,
+            b"\x30\x30\x30\x30": "Ghidra_GZF",
+        }
         try:
             with path.open("rb") as f:
-                header = f.read(4)
-                if not header:
-                    return False
-                # ELF: 0x7f 'ELF'
-                if header.startswith(b"\x7fELF"):
-                    return True
-                # PE executables typically start with 'MZ' (DOS stub)
-                if header.startswith(b"MZ"):
-                    return True
-                return False
-        except Exception as e:
-            logger.debug(f"Could not read file header for {path}: {e}")
-            return False
+                header = f.read(8)
+        except Exception:
+            return None
+
+        for magic, fmt in magic_table.items():
+            if header.startswith(magic):
+                return fmt
+
+        return None
 
     def _import_callback(self, future: concurrent.futures.Future):
         """

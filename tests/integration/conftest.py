@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+from pathlib import Path
 
 import pytest
 from mcp import StdioServerParameters
@@ -144,3 +145,43 @@ def find_binary_in_list_response():
         return None
 
     return _finder
+
+
+@pytest.fixture(scope="module")
+def server_params_existing_notepad_project():
+    """Server with existing notepad project from other_projects/"""
+    project_path = Path(__file__).parent.parent.parent / "other_projects" / "notepad.gpr"
+    return StdioServerParameters(
+        command="python",
+        args=["-m", "pyghidra_mcp", "--project-path", str(project_path), "--wait-for-analysis"],
+        env={"GHIDRA_INSTALL_DIR": "/ghidra"},
+    )
+
+
+@pytest.fixture(scope="module")
+def custom_project_directory():
+    """Create temporary directory for custom named projects"""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        yield Path(temp_dir)
+
+
+@pytest.fixture(scope="module")
+def server_params_custom_project_name(custom_project_directory):
+    """Server with custom project path and name"""
+    custom_project = custom_project_directory / "my_analysis_project"
+    return StdioServerParameters(
+        command="python",
+        args=["-m", "pyghidra_mcp", "--project-path", str(custom_project), "--wait-for-analysis"],
+        env={"GHIDRA_INSTALL_DIR": "/ghidra"},
+    )
+
+
+@pytest.fixture(scope="module")
+def server_params_nested_project_location(custom_project_directory):
+    """Server with nested project location"""
+    nested_project = custom_project_directory / "deeply/nested/location/test_project"
+    return StdioServerParameters(
+        command="python",
+        args=["-m", "pyghidra_mcp", "--project-path", str(nested_project), "--wait-for-analysis"],
+        env={"GHIDRA_INSTALL_DIR": "/ghidra"},
+    )

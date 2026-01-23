@@ -94,6 +94,14 @@ graph TD
   - [Yet another Ghidra MCP?](#yet-another-ghidra-mcp)
   - [Contents](#contents)
   - [Getting started](#getting-started)
+  - [Project Creation, Management, and Opening Existing Projects](#project-creation-management-and-opening-existing-projects)
+    - [Creating New Projects](#creating-new-projects)
+      - [Self-Contained Project Structure](#self-contained-project-structure)
+      - [Basic Project Creation](#basic-project-creation)
+      - [Custom Project Creation](#custom-project-creation)
+      - [Creating Multiple Related Projects](#creating-multiple-related-projects)
+    - [Opening Existing Ghidra Projects](#opening-existing-ghidra-projects)
+      - [Opening by .gpr File](#opening-by-gpr-file)
   - [Development](#development)
     - [Setup](#setup)
     - [Testing and Quality](#testing-and-quality)
@@ -101,14 +109,14 @@ graph TD
     - [Tools](#tools)
       - [Code Search](#code-search)
       - [Cross-References](#cross-references)
-      - [Decompile Function](#decompile-function)
       - [Generate Call Graph](#generate-call-graph)
+      - [Decompile Function](#decompile-function)
       - [Import Binary](#import-binary)
-      - [Delete Project Binary](#delete-project-binary)
       - [List Exports](#list-exports)
       - [List Imports](#list-imports)
       - [List Project Binaries](#list-project-binaries)
       - [List Project Binary Metadata](#list-project-binary-metadata)
+      - [Delete Project Binary](#delete-project-binary)
       - [Read Bytes](#read-bytes)
       - [Search Strings](#search-strings)
       - [Search Symbols](#search-symbols)
@@ -139,7 +147,7 @@ graph TD
 Run the [Python package](https://pypi.org/p/pyghidra-mcp) as a CLI command using [`uv`](https://docs.astral.sh/uv/guides/tools/):
 
 ```bash
-uvx pyghidra-mcp # see --help for more options
+uvx pyghidra-mcp # Creates pyghidra_mcp_projects directory by default
 ```
 
 Or, run as a [Docker container](https://ghcr.io/clearbluejar/pyghidra-mcp):
@@ -147,6 +155,76 @@ Or, run as a [Docker container](https://ghcr.io/clearbluejar/pyghidra-mcp):
 ```bash
 docker run -i --rm ghcr.io/clearbluejar/pyghidra-mcp -t stdio
 ```
+
+## Project Creation, Management, and Opening Existing Projects
+
+### Creating New Projects
+
+You can create new projects in several ways, depending on your workflow:
+
+#### Self-Contained Project Structure
+
+`pyghidra-mcp` creates a **self-contained project structure** where each project has its own Ghidra project and pyghidra-mcp artifacts. This ensures complete isolation and easy project management.
+
+#### Basic Project Creation
+
+```bash
+# Create a new project with default settings
+python -m pyghidra_mcp
+
+# Creates: 
+$ tree pyghidra_mcp_projects/
+pyghidra_mcp_projects/
+├── my_project.gpr
+├── my_project-pyghidra-mcp
+│   ├── chromadb
+│   └── gzfs
+└── my_project.rep
+```
+
+#### Custom Project Creation
+
+```bash
+# Create project with custom name and location
+python -m pyghidra_mcp --project-path ~/analysis/malware_study --project-name malware_analysis
+
+$ tree ~/analysis/ 
+/home/vscode/analysis/
+└── malware_study
+    ├── malware_analysis.gpr
+    ├── malware_analysis-pyghidra-mcp
+    │   ├── chromadb
+    │   └── gzfs
+    └── malware_analysis.rep
+```
+
+#### Creating Multiple Related Projects
+
+```bash
+# Create separate projects for different analysis focuses
+mkdir ~/reverse_engineering_workspace
+
+# Project for suspicious binaries
+python -m pyghidra_mcp --project-path ~/reverse_engineering_workspace/suspicious_binaries --project-name suspicious_analysis
+
+# Project for packed malware  
+python -m pyghidra_mcp --project-path ~/reverse_engineering_workspace/packed_malware --project-name packed_analysis
+```
+
+### Opening Existing Ghidra Projects
+
+If you have existing Ghidra projects (`.gpr` files), you can open them directly with `pyghidra-mcp`:
+
+#### Opening by .gpr File
+
+```bash
+# Open existing Ghidra project (project name derived from filename)
+python -m pyghidra_mcp --project-path ~/existing/ghidra/my_research.gpr
+
+# Result: ~/existing/ghidra/my_research-pyghidra-mcp/
+# └── chromadb/, gzfs/ (pyghidra-mcp additions)
+```
+
 
 ## Development
 
@@ -285,7 +363,10 @@ Options:
                                     streamable-http, or sse (legacy).
   --project-path PATH               Location on disk which points to the Ghidra
                                     project to use. Can be an existing file.
-                                    [default: pyghidra_mcp_projects/pyghidra_mcp]
+                                    [default: pyghidra_mcp_projects]
+  --project-name TEXT               Name for the project (used for Ghidra project
+                                    files). Ignored when using .gpr files.
+                                    [default: my_project]
   -p, --port INTEGER                Port to listen on for HTTP-based transports
                                     (streamable-http, sse). [default: 8000]
   -o, --host TEXT                   Host to listen on for HTTP-based transports
