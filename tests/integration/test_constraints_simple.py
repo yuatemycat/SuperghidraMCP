@@ -53,55 +53,6 @@ def test_gpr_name_derivation():
             assert derived_name == expected_name, f"Expected {expected_name}, got {derived_name}"
 
 
-def test_writeability_check_with_existing_directory():
-    """Test writeability validation with existing directory"""
-    with tempfile.TemporaryDirectory() as temp_dir:
-        test_dir = Path(temp_dir) / "test_project"
-        test_dir.mkdir()
-
-        # Should be able to write to this directory
-        assert test_dir.exists()
-
-        # Try to create a test file
-        test_file = test_dir / ".writeability_test"
-        test_file.touch()
-        assert test_file.exists()
-        test_file.unlink()
-
-
-def test_writeability_check_with_nonexistent_directory():
-    """Test writeability validation with non-existent directory"""
-    with tempfile.TemporaryDirectory() as temp_dir:
-        test_dir = Path(temp_dir) / "nonexistent" / "test_project"
-
-        # Directory doesn't exist but parent is writeable
-        # Should be able to create it
-        test_dir.mkdir(parents=True, exist_ok=True)
-        assert test_dir.exists()
-
-
-def test_readonly_directory_detection():
-    """Test detection of read-only directories"""
-    with tempfile.TemporaryDirectory() as temp_dir:
-        readonly_dir = Path(temp_dir) / "readonly"
-        readonly_dir.mkdir()
-        readonly_dir.chmod(0o444)  # Read-only
-
-        # Try to create a test file - should fail
-        test_file = readonly_dir / ".writeability_test"
-        try:
-            test_file.touch()
-            # If we get here, test failed (directory was writeable)
-            test_file.unlink()
-            # Restore permissions for cleanup
-            readonly_dir.chmod(0o755)
-            raise AssertionError("Expected PermissionError for read-only directory")
-        except (OSError, PermissionError):
-            # Expected behavior - restore permissions for cleanup
-            readonly_dir.chmod(0o755)
-            assert True
-
-
 def test_project_name_default_value():
     """Test that default project name is 'my_project'"""
     import click.testing
@@ -134,9 +85,6 @@ if __name__ == "__main__":
     # Run basic tests
     test_gpr_constraint_validation()
     test_gpr_name_derivation()
-    test_writeability_check_with_existing_directory()
-    test_writeability_check_with_nonexistent_directory()
-    test_readonly_directory_detection()
     test_project_name_default_value()
     test_gpr_help_text_updated()
     print("All tests passed!")

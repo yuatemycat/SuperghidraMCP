@@ -477,9 +477,11 @@ def import_binary(binary_path: str, ctx: Context) -> str:
 
 def init_pyghidra_context(
     mcp: FastMCP,
+    *,
     input_paths: list[Path],
     project_name: str,
     project_directory: str,
+    pyghidra_mcp_dir: Path,
     force_analysis: bool,
     verbose_analysis: bool,
     no_symbols: bool,
@@ -509,6 +511,7 @@ def init_pyghidra_context(
     pyghidra_context = PyGhidraContext(
         project_name=project_name,
         project_path=project_directory,
+        pyghidra_mcp_dir=pyghidra_mcp_dir,
         force_analysis=force_analysis,
         verbose_analysis=verbose_analysis,
         no_symbols=no_symbols,
@@ -600,9 +603,16 @@ def init_pyghidra_context(
 @optgroup.option(
     "--project-path",
     type=click.Path(path_type=Path),
-    default=Path("pyghidra_mcp_projects/pyghidra_mcp"),
+    default=Path("pyghidra_mcp_projects"),
     show_default=True,
-    help="Path to the Ghidra project.",
+    help="Directory path to create new pyghidra-mcp project or an existing Ghidra .gpr file.",
+)
+@optgroup.option(
+    "--project-name",
+    type=str,
+    default="my_project",
+    show_default=True,
+    help="Name for the project (used for Ghidra project files). Ignored when using .gpr files.",
 )
 @optgroup.option(
     "--threaded/--no-threaded",
@@ -676,6 +686,7 @@ def main(
     transport: str,
     input_paths: list[Path],
     project_path: Path,
+    project_name: str,
     port: int,
     host: str,
     threaded: bool,
@@ -698,8 +709,23 @@ def main(
     For streamable-http and sse, it will start an HTTP server on the specified port (default 8000).
 
     """
-    project_name = project_path.stem
-    project_directory = str(project_path.parent)
+    # Handle both .gpr files and directory paths
+    if project_path.suffix.lower() == ".gpr":
+        # Check constraint: cannot use --project-name with .gpr files
+        if project_name != "my_project":  # project_name was explicitly provided (not default)
+            raise click.BadParameter("Cannot use --project-name when specifying a .gpr file")
+
+        # Direct .gpr opening - create pyghidra-mcp alongside existing project
+        project_directory = str(project_path.parent)
+        project_name = project_path.stem
+        pyghidra_mcp_dir = project_path.parent / f"{project_name}-pyghidra-mcp"
+    else:
+        # Directory-based opening - create self-contained project
+        # Use provided project_name (defaults to my_project)
+        # This creates the structure:
+        # project_path/project_name.gpr, project_path/project_name-pyghidra-mcp/, etc.
+        project_directory = str(project_path)
+        pyghidra_mcp_dir = project_path / f"{project_name}-pyghidra-mcp"
     mcp.settings.port = port
     mcp.settings.host = host
 
@@ -719,6 +745,7 @@ def main(
         wait_for_analysis=wait_for_analysis,
         list_project_binaries=list_project_binaries,
         delete_project_binary=delete_project_binary,
+        pyghidra_mcp_dir=pyghidra_mcp_dir,
     )
 
     try:

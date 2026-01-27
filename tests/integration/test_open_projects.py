@@ -101,9 +101,9 @@ async def test_existing_project_pyghidra_integration(server_params_existing_note
         async with ClientSession(read, write) as session:
             await session.initialize()
 
-            # Should create chromadb alongside existing notepad.rep structure
+            # Should create chromadb in notepad-pyghidra-mcp directory alongside existing project
             notepad_project = Path(__file__).parent.parent.parent / "other_projects" / "notepad"
-            chromadb_path = notepad_project / "chromadb"
+            chromadb_path = notepad_project.parent / "notepad-pyghidra-mcp" / "chromadb"
             assert chromadb_path.exists(), "ChromaDB should be added to existing projects"
 
             # Should still be able to list binaries (may be empty)

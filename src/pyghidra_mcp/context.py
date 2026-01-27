@@ -9,32 +9,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Union
 
 import chromadb
-import click
 from chromadb.config import Settings
 
 from pyghidra_mcp.tools import GhidraTools
-
-
-def check_directory_writeability(directory: Path, directory_type: str = "directory") -> None:
-    """Check if directory is writeable and raise clear error if not."""
-    try:
-        # Ensure parent directory exists for writeability test
-        directory.mkdir(parents=True, exist_ok=True)
-
-        # Test writeability by attempting to create a temporary file
-        test_file = directory / ".writeability_test"
-        test_file.touch()
-        test_file.unlink()
-    except (OSError, PermissionError) as e:
-        raise click.ClickException(
-            f"Cannot write to {directory_type} directory: {directory}. "
-            f"Please check permissions and ensure directory exists and is writeable."
-        ) from e
-    except Exception as e:
-        raise click.ClickException(
-            f"Unexpected error checking {directory_type} directory: {directory}. Error: {e!s}"
-        ) from e
-
 
 if TYPE_CHECKING:
     from ghidra.app.decompiler import DecompInterface
@@ -122,7 +99,6 @@ class PyGhidraContext:
             self.pyghidra_mcp_dir = self.project_path / "pyghidra-mcp"
 
         chromadb_path = self.pyghidra_mcp_dir / "chromadb"
-        check_directory_writeability(chromadb_path.parent, "ChromaDB parent directory")
         chromadb_path.mkdir(parents=True, exist_ok=True)
         self.chroma_client = chromadb.PersistentClient(
             path=str(chromadb_path), settings=Settings(anonymized_telemetry=False)
@@ -136,7 +112,6 @@ class PyGhidraContext:
         self.program_options = program_options
         self.gzfs_path = Path(gzfs_path) if gzfs_path else self.pyghidra_mcp_dir / "gzfs"
         if self.gzfs_path:
-            check_directory_writeability(self.gzfs_path.parent, "GZFS parent directory")
             self.gzfs_path.mkdir(exist_ok=True, parents=True)
 
         self.threaded = threaded
