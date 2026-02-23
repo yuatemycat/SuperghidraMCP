@@ -1,4 +1,4 @@
-name: Release
+name: Release Cli
 
 on:
   release:
@@ -14,6 +14,8 @@ on:
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
     defaults:
       run:
         working-directory: ./cli
