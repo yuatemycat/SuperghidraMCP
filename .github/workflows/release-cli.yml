@@ -1,6 +1,8 @@
-name: Release CLI
+name: Release
 
 on:
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       run-tests:
@@ -10,7 +12,7 @@ on:
         type: boolean
 
 jobs:
-  build-and-publish-cli:
+  build-and-publish:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -33,16 +35,17 @@ jobs:
         if: ${{ inputs.run-tests == 'true' }}
         run: pytest
 
-      - name: Build CLI package
+      - name: Build package
         run: python -m build
 
-      - name: Show contents of CLI source distribution
+      - name: Show contents of source distribution
         run: |
-          echo "📂 Contents of CLI source distribution archive:"
+          echo "📂 Contents of source distribution archive:"
           tar -tf dist/*.tar.gz
 
-      - name: Publish CLI to PyPI
+      - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
+          packages-dir: ./cli/dist
           user: __token__
-          password: ${{ secrets.PYPI_API_TOKEN_CLI }}
+          password: ${{ secrets.PYPI_API_TOKEN }}
