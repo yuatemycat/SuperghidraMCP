@@ -1,3 +1,5 @@
+import platform
+
 import pytest
 from mcp import ClientSession
 from mcp.client.stdio import stdio_client
@@ -11,6 +13,8 @@ async def test_search_symbols_by_name(server_params):
     """
     Tests searching for symbols by name.
     """
+    name_one = "_function_one" if platform.system() == "Darwin" else "function_one"
+    name_two = "_function_two" if platform.system() == "Darwin" else "function_two"
     async with stdio_client(server_params) as (read, write):
         async with ClientSession(read, write) as session:
             # Initialize the connection
@@ -24,5 +28,5 @@ async def test_search_symbols_by_name(server_params):
 
             search_results = SymbolSearchResults.model_validate_json(response.content[0].text)
             assert len(search_results.symbols) >= 2
-            assert any("function_one" in s.name for s in search_results.symbols)
-            assert any("function_two" in s.name for s in search_results.symbols)
+            assert any(name_one in s.name for s in search_results.symbols)
+            assert any(name_two in s.name for s in search_results.symbols)
