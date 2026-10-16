@@ -1,4 +1,5 @@
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -33,8 +34,19 @@ class ProgramInfo(BaseModel):
     strings_indexed: bool
 
 
+class SessionInfo(BaseModel):
+    role: Literal["primary", "fork"]
+    project: str
+    fork_id: str | None = None
+    parent_project: str | None = None
+    journal_ops: int | None = Field(None, description="edits journaled by this fork")
+    pending_fork_ops: int | None = Field(None, description="unmerged edits across all forks")
+    hint: str | None = None
+
+
 class ProgramInfos(BaseModel):
     programs: list[ProgramInfo]
+    session: SessionInfo | None = None
 
 
 class OpenProgramInfo(BaseModel):
@@ -252,3 +264,46 @@ class CallGraphResult(BaseModel):
     display_type: CallGraphDisplayType
     graph: str = Field(..., description="MermaidJS graph string")
     mermaid_url: str
+
+
+class ForkInfo(BaseModel):
+    fork_id: str
+    label: str | None = None
+    status: str
+    alive: bool | None = Field(None, description="fork server running; null if on another host")
+    pid: int | None = None
+    created_at: str
+    journal_ops: int
+    resolved_ops: int
+    pending_ops: int
+    path: str
+
+
+class ForkList(BaseModel):
+    session: SessionInfo | None = None
+    forks: list[ForkInfo]
+
+
+class ForkMergeEntry(BaseModel):
+    seq: int
+    op: str
+    binary: str
+    target: str
+    status: str = Field(
+        ...,
+        description=(
+            "applied, already_applied, overwritten, queued, ignored (final); "
+            "conflict, skipped, failed (retried by the next merge); "
+            "would_apply, would_overwrite (dry run)"
+        ),
+    )
+    detail: str | None = None
+
+
+class ForkMergeResult(BaseModel):
+    fork_id: str
+    dry_run: bool
+    on_conflict: str
+    counts: dict[str, int]
+    entries: list[ForkMergeEntry]
+    pending_ops: int

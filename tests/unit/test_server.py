@@ -32,10 +32,13 @@ async def test_common_tools_register_with_mcp_v2():
         "decompile_function",
         "delete_project_binary",
         "disassemble",
+        "discard_fork",
         "gen_callgraph",
         "import_binary",
         "list_exports",
+        "list_forks",
         "list_imports",
+        "merge_fork",
         "list_project_binaries",
         "list_project_binary_metadata",
         "list_xrefs",
@@ -84,7 +87,7 @@ async def test_common_tool_call_over_mcp_v2_protocol():
             result = await session.call_tool("list_project_binaries")
 
     assert result.is_error is False
-    assert json.loads(result.content[0].text) == {"programs": []}
+    assert json.loads(result.content[0].text) == {"programs": [], "session": None}
     pyghidra_context.list_project_binary_infos.assert_called_once_with()
 
 

@@ -6,6 +6,7 @@ import functools
 import logging
 import math
 import re
+import threading
 import time
 import typing
 from contextlib import contextmanager
@@ -43,16 +44,23 @@ if typing.TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 DEFAULT_DECOMPILE_TIMEOUT_SECONDS = 30
 
+# Sync MCP tools run on worker threads, and Ghidra folds a transaction started on
+# one thread into another thread's open transaction. If either then ends with
+# commit=False, the whole combined transaction rolls back, so one failed edit could
+# silently undo a concurrent successful one. Edits are short; serialize them.
+_transaction_lock = threading.RLock()
+
 
 @contextmanager
 def ghidra_transaction(program, description: str):
-    tx_id = program.startTransaction(description)
-    committed = False
-    try:
-        yield
-        committed = True
-    finally:
-        program.endTransaction(tx_id, committed)
+    with _transaction_lock:
+        tx_id = program.startTransaction(description)
+        committed = False
+        try:
+            yield
+            committed = True
+        finally:
+            program.endTransaction(tx_id, committed)
 
 
 def handle_exceptions(func):
@@ -108,6 +116,30 @@ class GhidraTools:
 
         variable_kind, variable = matches[0]
         return func, variable_kind, variable
+
+    def find_variable(
+        self,
+        function_name_or_address: str,
+        *,
+        storage: str | None = None,
+        names: typing.Iterable[str] = (),
+    ) -> tuple["Function", str, typing.Any]:
+        """Locate a parameter or local by storage (stable across renames), then by name."""
+        func = self.find_function(function_name_or_address)
+        candidates = [("parameter", p) for p in func.getParameters()]
+        candidates += [("local", v) for v in func.getLocalVariables()]
+
+        if storage:
+            for kind, variable in candidates:
+                if str(variable.getVariableStorage()) == storage:
+                    return func, kind, variable
+        for name in names:
+            matches = [(k, v) for k, v in candidates if str(v.getName()) == name]
+            if len(matches) == 1:
+                return func, matches[0][0], matches[0][1]
+
+        wanted = storage or ", ".join(names)
+        raise ValueError(f"Variable '{wanted}' not found in function '{func.getName()}'.")
 
     def _parse_data_type(self, type_name: str):
         from ghidra.util.data import DataTypeParser  # type: ignore
@@ -1014,6 +1046,7 @@ class GhidraTools:
             "variable_kind": variable_kind,
             "old_name": old_name,
             "new_name": new_name,
+            "storage": str(variable.getVariableStorage()),
         }
 
     @handle_exceptions
@@ -1047,6 +1080,7 @@ class GhidraTools:
             "variable_name": str(variable.getName()),
             "old_type": old_type,
             "new_type": str(variable.getDataType().getDisplayName()),
+            "storage": str(variable.getVariableStorage()),
         }
 
     @handle_exceptions
@@ -1091,12 +1125,12 @@ class GhidraTools:
             "new_prototype": str(func.getSignature()),
         }
 
-    @handle_exceptions
-    def set_comment(self, target: str, comment: str, comment_type: str) -> dict:
+    @staticmethod
+    def _listing_comment_types() -> dict[str, typing.Any]:
         try:
             from ghidra.program.model.listing import CommentType
 
-            listing_comment_types = {
+            return {
                 "plate": CommentType.PLATE,
                 "pre": CommentType.PRE,
                 "eol": CommentType.EOL,
@@ -1106,7 +1140,7 @@ class GhidraTools:
         except ImportError:
             from ghidra.program.model.listing import CodeUnit
 
-            listing_comment_types = {
+            return {
                 "plate": CodeUnit.PLATE_COMMENT,
                 "pre": CodeUnit.PRE_COMMENT,
                 "eol": CodeUnit.EOL_COMMENT,
@@ -1114,10 +1148,32 @@ class GhidraTools:
                 "repeatable": CodeUnit.REPEATABLE_COMMENT,
             }
 
+    def _ghidra_comment_type(self, comment_type: str):
+        listing_comment_types = self._listing_comment_types()
+        ghidra_comment_type = listing_comment_types.get(comment_type)
+        if ghidra_comment_type is None:
+            allowed = ["decompiler", *listing_comment_types.keys()]
+            raise ValueError(f"Invalid comment_type '{comment_type}'. Expected one of: {allowed}")
+        return ghidra_comment_type
+
+    def get_comment(self, target: str, comment_type: str) -> str | None:
+        """Return the current comment of ``comment_type`` at ``target``, if any."""
+        normalized_type = comment_type.lower()
+        if normalized_type == "decompiler":
+            comment = self.find_function(target).getComment()
+        else:
+            ghidra_comment_type = self._ghidra_comment_type(normalized_type)
+            addr = self._resolve_comment_target_address(target)
+            comment = self.program.getListing().getComment(ghidra_comment_type, addr)
+        return None if comment is None else str(comment)
+
+    @handle_exceptions
+    def set_comment(self, target: str, comment: str, comment_type: str) -> dict:
         normalized_type = comment_type.lower()
         if normalized_type == "decompiler":
             func = self.find_function(target)
             addr = func.getEntryPoint()
+            old_comment = func.getComment()
 
             with ghidra_transaction(
                 self.program,
@@ -1130,25 +1186,25 @@ class GhidraTools:
                 "address": str(addr),
                 "comment": comment,
                 "comment_type": "decompiler",
+                "old_comment": None if old_comment is None else str(old_comment),
             }
 
-        ghidra_comment_type = listing_comment_types.get(normalized_type)
-        if ghidra_comment_type is None:
-            allowed = ["decompiler", *listing_comment_types.keys()]
-            raise ValueError(f"Invalid comment_type '{comment_type}'. Expected one of: {allowed}")
-
+        ghidra_comment_type = self._ghidra_comment_type(normalized_type)
         addr = self._resolve_comment_target_address(target)
+        listing = self.program.getListing()
+        old_comment = listing.getComment(ghidra_comment_type, addr)
         with ghidra_transaction(
             self.program,
             f"pyghidra-mcp: set {normalized_type} comment @ {addr}",
         ):
-            self.program.getListing().setComment(addr, ghidra_comment_type, comment)
+            listing.setComment(addr, ghidra_comment_type, comment)
 
         self.invalidate_decompiler_cache()
         return {
             "address": str(addr),
             "comment": comment,
             "comment_type": normalized_type,
+            "old_comment": None if old_comment is None else str(old_comment),
         }
 
     def invalidate_decompiler_cache(self) -> None:
