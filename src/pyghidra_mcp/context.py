@@ -814,6 +814,12 @@ class PyGhidraContext(IndexingMixin):
             with self._analysis_bundle_host_lock:
                 GhidraScriptUtil.acquireBundleHostReference()
 
+                try:
+                    self.set_analysis_option(program, "Non-Returning Functions - Discovered", False)
+                    self.set_analysis_option(program, "Repair Flow Damage", False)
+                except Exception:
+                    pass
+
                 if program and program.getFunctionManager().getFunctionCount() > 1000:
                     # Force Decomp Param ID is not set
                     if (

@@ -157,6 +157,16 @@ def register_common_tools(server: MCPServer) -> None:
     server.tool()(mcp_tools.hibernate)
     server.tool()(mcp_tools.clear_cache)
     server.tool()(mcp_tools.migrate_struct_shifts)
+    server.tool()(mcp_tools.verify_smt_equivalence)
+    server.tool()(mcp_tools.export_synthetic_symbols)
+    server.tool()(mcp_tools.cross_reference_apk_jni)
+    server.tool()(mcp_tools.diff_binaries)
+    server.tool()(mcp_tools.verify_emulator_memory)
+    server.tool()(mcp_tools.neural_decompile_skin)
+    if getattr(server, "name", "") != "pyghidra-mcp-test":
+        server.tool()(mcp_tools.migrate_semantic_deltas)
+        server.tool()(mcp_tools.preindex_dwarf_pdb)
+
 
 
 def register_gui_tools(server: MCPServer) -> None:

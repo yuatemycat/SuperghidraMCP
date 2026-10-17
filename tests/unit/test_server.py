@@ -30,10 +30,13 @@ async def test_common_tools_register_with_mcp_v2():
     tools = await mcp.list_tools()
     assert {tool.name for tool in tools} == {
         "clear_cache",
+        "cross_reference_apk_jni",
         "decompile_function",
         "delete_project_binary",
+        "diff_binaries",
         "disassemble",
         "discard_fork",
+        "export_synthetic_symbols",
         "gen_callgraph",
         "gpu_adrp_scan",
         "gpu_seed_functions",
@@ -43,6 +46,8 @@ async def test_common_tools_register_with_mcp_v2():
         "list_forks",
         "list_imports",
         "merge_fork",
+        "migrate_struct_shifts",
+        "neural_decompile_skin",
         "list_project_binaries",
         "list_project_binary_metadata",
         "list_xrefs",
@@ -58,6 +63,8 @@ async def test_common_tools_register_with_mcp_v2():
         "set_function_prototype",
         "set_governor_mode",
         "set_variable_type",
+        "verify_emulator_memory",
+        "verify_smt_equivalence",
     }
 
 
