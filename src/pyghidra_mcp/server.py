@@ -121,9 +121,9 @@ async def server_lifespan(server: MCPServer) -> AsyncIterator[MCPContext]:
 
 
 try:
-    mcp = MCPServer("pyghidra-mcp", version=__version__, lifespan=server_lifespan)  # type: ignore
+    mcp = MCPServer("SuperghidraMCP", version=__version__, lifespan=server_lifespan)  # type: ignore
 except TypeError:
-    mcp = MCPServer("pyghidra-mcp", lifespan=server_lifespan)  # type: ignore
+    mcp = MCPServer("SuperghidraMCP", lifespan=server_lifespan)  # type: ignore
 
 
 def register_common_tools(server: MCPServer) -> None:
