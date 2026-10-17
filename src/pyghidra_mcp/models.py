@@ -399,3 +399,41 @@ class ClearCacheResult(BaseModel):
     status: str = "ok"
     cleared_entries: int
     message: str
+
+
+class FieldMigrationItem(BaseModel):
+    field_name: str
+    old_offset: str
+    new_offset: str
+    delta: int
+    shift_type: str
+    confidence: float
+    old_offset_int: int
+    new_offset_int: int
+    access_size: int = 4
+    sample_v1_insn: str = ""
+    sample_v2_insn: str = ""
+
+
+class StructInsertionItem(BaseModel):
+    offset: str
+    offset_int: int
+    size: int
+    probable_type: str
+
+
+class MigrateStructShiftsResult(BaseModel):
+    status: str = "ok"
+    old_binary: str
+    new_binary: str
+    struct_name: str | None = None
+    total_shifts_detected: int
+    matched_functions: int
+    max_delta: int = 0
+    field_migrations: list[FieldMigrationItem]
+    insertions: list[StructInsertionItem]
+    cpp_header_patch: str
+    updated_header: str
+    migration_report_json: str
+    summary: str
+    message: str

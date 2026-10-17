@@ -6,6 +6,7 @@ This module contains all MCP tool implementations with centralized error handlin
 
 import asyncio
 import functools
+import json
 import logging
 import os
 import sys
@@ -65,6 +66,9 @@ from pyghidra_mcp.models import (
     SymbolSearchResults,
     VariableRenameResponse,
     VariableTypeResponse,
+    FieldMigrationItem,
+    StructInsertionItem,
+    MigrateStructShiftsResult,
 )
 from pyghidra_mcp.tools import GhidraTools
 
@@ -1031,4 +1035,76 @@ def clear_cache(ctx: Context | None = None) -> ClearCacheResult:
         status="ok",
         cleared_entries=deleted,
         message=f"Persistent L2 SQLite cache purged ({deleted} entries removed).",
+    )
+
+
+@mcp_error_handler
+def migrate_struct_shifts(
+    old_binary_path: str,
+    new_binary_path: str,
+    struct_name: str | None = None,
+    original_header: str | None = None,
+    ctx: Context | None = None,
+) -> MigrateStructShiftsResult:
+    """Discovers struct field displacement shifts between two binary versions and generates C++ header patches.
+
+    Args:
+        old_binary_path: Path to v1 binary or disassembly file.
+        new_binary_path: Path to v2 binary or disassembly file.
+        struct_name: Name of target struct (default: 'TargetStruct').
+        original_header: Optional existing C++ header source to patch.
+    """
+    _ensure_superghidra_imported()
+    from struct_shift_migrator import migrate_struct_shifts as _sg_migrate
+
+    report = _sg_migrate(
+        old_binary_path=old_binary_path,
+        new_binary_path=new_binary_path,
+        struct_name=struct_name,
+        original_header=original_header,
+    )
+    report_dict = report.to_dict()
+
+    field_migrations = [
+        FieldMigrationItem(
+            field_name=m["field_name"],
+            old_offset=m["old_offset"],
+            new_offset=m["new_offset"],
+            delta=m["delta"],
+            shift_type=m["shift_type"],
+            confidence=m["confidence"],
+            old_offset_int=m["old_offset_int"],
+            new_offset_int=m["new_offset_int"],
+            access_size=m.get("access_size", 4),
+            sample_v1_insn=m.get("sample_v1_insn", ""),
+            sample_v2_insn=m.get("sample_v2_insn", ""),
+        )
+        for m in report_dict["field_migrations"]
+    ]
+
+    insertions = [
+        StructInsertionItem(
+            offset=ins["offset"],
+            offset_int=ins["offset_int"],
+            size=ins["size"],
+            probable_type=ins["probable_type"],
+        )
+        for ins in report_dict["insertions"]
+    ]
+
+    return MigrateStructShiftsResult(
+        status="ok",
+        old_binary=report.old_binary,
+        new_binary=report.new_binary,
+        struct_name=report.struct_name,
+        total_shifts_detected=report.total_shifts_detected,
+        matched_functions=report.matched_functions,
+        max_delta=report.max_delta,
+        field_migrations=field_migrations,
+        insertions=insertions,
+        cpp_header_patch=report.cpp_header_patch,
+        updated_header=report.updated_header,
+        migration_report_json=json.dumps(report_dict, indent=2),
+        summary=report.summary,
+        message=f"Migrated {len(field_migrations)} fields with {report.total_shifts_detected} shifts detected.",
     )

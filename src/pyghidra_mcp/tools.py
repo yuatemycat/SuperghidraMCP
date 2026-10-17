@@ -1334,3 +1334,40 @@ class GhidraTools:
         raise ValueError(
             f"Could not resolve comment target '{target}' as an address, symbol, or function."
         )
+
+    @handle_exceptions
+    def migrate_struct_shifts(
+        self,
+        old_binary_path: str,
+        new_binary_path: str,
+        struct_name: typing.Optional[str] = None,
+        original_header: typing.Optional[str] = None,
+    ) -> dict[str, typing.Any]:
+        """Discovers struct field displacement shifts between two binary versions."""
+        return migrate_struct_shifts(
+            old_binary_path=old_binary_path,
+            new_binary_path=new_binary_path,
+            struct_name=struct_name,
+            original_header=original_header,
+        )
+
+
+def migrate_struct_shifts(
+    old_binary_path: str,
+    new_binary_path: str,
+    struct_name: typing.Optional[str] = None,
+    original_header: typing.Optional[str] = None,
+) -> dict[str, typing.Any]:
+    """Analyzes two binary versions to discover struct displacement shifts and generate C++ header patches."""
+    import sys
+    sg_path = r"E:\02_Projects\SuperGhidra"
+    if sg_path not in sys.path:
+        sys.path.insert(0, sg_path)
+    from struct_shift_migrator import migrate_struct_shifts as _sg_migrate
+    report = _sg_migrate(
+        old_binary_path=old_binary_path,
+        new_binary_path=new_binary_path,
+        struct_name=struct_name,
+        original_header=original_header,
+    )
+    return report.to_dict()

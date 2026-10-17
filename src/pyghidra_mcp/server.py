@@ -156,6 +156,7 @@ def register_common_tools(server: MCPServer) -> None:
     server.tool()(mcp_tools.set_governor_mode)
     server.tool()(mcp_tools.hibernate)
     server.tool()(mcp_tools.clear_cache)
+    server.tool()(mcp_tools.migrate_struct_shifts)
 
 
 def register_gui_tools(server: MCPServer) -> None:
