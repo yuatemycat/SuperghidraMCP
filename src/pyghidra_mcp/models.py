@@ -573,3 +573,40 @@ class PreindexDwarfPdbResult(BaseModel):
     message: str
 
 
+class InspectBinaryResult(BaseModel):
+    status: str = "ok"
+    path: str
+    format: str = Field(description="elf | pe | macho | raw")
+    arch: str = Field(description="x86 | x86_64 | arm | arm64 | mips | riscv64 | ppc | ...")
+    bits: int
+    endian: str
+    image_base: str
+    entry: str | None = None
+    is_library: bool
+    is_dotnet: bool = False
+    pdb_path: str | None = None
+    libraries: list[str] = Field(default_factory=list)
+    sections: list[dict[str, Any]] = Field(default_factory=list)
+    exports: list[dict[str, Any]] = Field(default_factory=list)
+    imports: list[dict[str, Any]] = Field(default_factory=list)
+    total_exports: int = 0
+    total_imports: int = 0
+    total_function_starts: int = 0
+    message: str = ""
+
+
+class RecoverCppClassesResult(BaseModel):
+    status: str = "ok"
+    path: str
+    arch: str
+    total_mfc_classes: int = 0
+    total_serializable: int = 0
+    total_rtti_classes: int = 0
+    mfc_classes: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="CRuntimeClass records: name, object_size, schema, base_name, vtable, serialize, create_object",
+    )
+    rtti_classes: list[dict[str, Any]] = Field(default_factory=list)
+    message: str = ""
+
+

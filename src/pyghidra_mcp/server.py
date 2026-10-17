@@ -163,6 +163,8 @@ def register_common_tools(server: MCPServer) -> None:
     server.tool()(mcp_tools.diff_binaries)
     server.tool()(mcp_tools.verify_emulator_memory)
     server.tool()(mcp_tools.neural_decompile_skin)
+    server.tool()(mcp_tools.inspect_binary)
+    server.tool()(mcp_tools.recover_cpp_classes)
     if getattr(server, "name", "") != "pyghidra-mcp-test":
         server.tool()(mcp_tools.migrate_semantic_deltas)
         server.tool()(mcp_tools.preindex_dwarf_pdb)

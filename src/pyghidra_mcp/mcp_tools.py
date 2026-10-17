@@ -83,6 +83,8 @@ from pyghidra_mcp.models import (
     MigratedEventRecordItem,
     MigrateSemanticDeltasResult,
     PreindexDwarfPdbResult,
+    InspectBinaryResult,
+    RecoverCppClassesResult,
 )
 
 from pyghidra_mcp.tools import GhidraTools
@@ -2315,6 +2317,111 @@ def preindex_dwarf_pdb(
         c_declaration=c_decl,
         matched_symbols=matched_syms,
         message=msg,
+    )
+
+
+@mcp_error_handler
+def inspect_binary(
+    binary_path: str,
+    name_filter: str | None = None,
+    limit: int = 200,
+    prefer_arch: str | None = None,
+    ctx: Context | None = None,
+) -> InspectBinaryResult:
+    """Identifies an ELF / PE (EXE, DLL) / Mach-O (incl. universal) binary without Ghidra.
+
+    Reports format, architecture, bitness, endianness, image base, entry point, sections,
+    exports (with PE ordinals/forwarders), imports (with DLL/dylib names) and PDB path.
+    Handles stripped/forged ELF section tables (protected Android libraries).
+
+    Args:
+        binary_path: Path to the binary.
+        name_filter: Optional case-insensitive substring to filter exports/imports.
+        limit: Maximum exports and imports returned (totals are always reported).
+        prefer_arch: For universal Mach-O files, the slice to load (e.g. 'arm64', 'x86_64').
+    """
+    _ensure_superghidra_imported()
+    import binary_loader
+
+    path = _resolve_safe_path(binary_path, must_exist=True, for_write=False)
+    img = binary_loader.load_binary(str(path), prefer_arch=prefer_arch)
+    needle = (name_filter or "").lower()
+    limit = max(0, min(int(limit), 5000))
+
+    def keep(name: str | None) -> bool:
+        return not needle or (name is not None and needle in name.lower())
+
+    exports = [
+        {"name": e.name, "address": hex(e.address), "ordinal": e.ordinal, "forwarder": e.forwarder}
+        for e in img.exports if keep(e.name)
+    ]
+    imports = [
+        {"library": i.library, "name": i.name, "ordinal": i.ordinal,
+         "slot": hex(i.address) if i.address else None, "delay_loaded": i.delay_loaded}
+        for i in img.imports if keep(i.name)
+    ]
+    sections = [
+        {"name": s.name, "vaddr": hex(s.vaddr), "size": s.vsize, "file_offset": s.file_offset,
+         "executable": s.executable, "writable": s.writable}
+        for s in (img.sections or img.segments) if s.mapped
+    ]
+    return InspectBinaryResult(
+        path=str(path), format=img.format, arch=img.arch, bits=img.bits, endian=img.endian,
+        image_base=hex(img.image_base), entry=hex(img.entry) if img.entry is not None else None,
+        is_library=img.is_library, is_dotnet=img.is_dotnet, pdb_path=img.pdb_path,
+        libraries=img.libraries, sections=sections,
+        exports=exports[:limit], imports=imports[:limit],
+        total_exports=len(img.exports), total_imports=len(img.imports),
+        total_function_starts=len(img.function_starts),
+        message=(f"{img.format.upper()} {img.arch} {img.bits}-bit {'library' if img.is_library else 'executable'}: "
+                 f"{len(img.exports)} exports, {len(img.imports)} imports, {len(img.function_starts)} known functions."),
+    )
+
+
+@mcp_error_handler
+def recover_cpp_classes(
+    binary_path: str,
+    name_filter: str | None = None,
+    serializable_only: bool = False,
+    include_rtti: bool = True,
+    limit: int = 500,
+    ctx: Context | None = None,
+) -> RecoverCppClassesResult:
+    """Recovers C++ classes from a Windows x86/x64 PE (EXE/DLL) without Ghidra.
+
+    Combines MSVC RTTI (class names, vftables, inheritance) with MFC CRuntimeClass records
+    (CArchive class name, object size, schema version, base class, CreateObject). Each MFC
+    class is linked to its vftable through GetRuntimeClass(), which yields the address of
+    its Serialize(CArchive&) function: decompile that address to learn the class's
+    on-disk field layout in MFC CArchive streams.
+
+    Args:
+        binary_path: Path to the PE file.
+        name_filter: Optional case-insensitive substring to filter class names.
+        serializable_only: Only return MFC classes with a serialization schema.
+        include_rtti: Also return RTTI classes (can be large).
+        limit: Maximum classes returned per list (totals are always reported).
+    """
+    _ensure_superghidra_imported()
+    import msvc_class_recovery
+
+    path = _resolve_safe_path(binary_path, must_exist=True, for_write=False)
+    report = msvc_class_recovery.recover_classes(str(path), rtti=include_rtti)
+    data = report.to_dict()
+    needle = (name_filter or "").lower()
+    limit = max(0, min(int(limit), 10000))
+    mfc = [c for c in data["mfc_classes"]
+           if (not needle or needle in c["name"].lower()) and (c["serializable"] or not serializable_only)]
+    rtti = [c for c in data["rtti_classes"] if not needle or needle in c["name"].lower()]
+    counts = data["counts"]
+    return RecoverCppClassesResult(
+        path=str(path), arch=report.arch,
+        total_mfc_classes=counts["mfc"], total_serializable=counts["mfc_serializable"],
+        total_rtti_classes=counts["rtti"],
+        mfc_classes=mfc[:limit], rtti_classes=rtti[:limit],
+        message=(f"{counts['mfc']} MFC CRuntimeClass records ({counts['mfc_serializable']} serializable, "
+                 f"{sum(1 for c in report.mfc_classes if c.serialize)} with Serialize() resolved) and "
+                 f"{counts['rtti']} RTTI classes."),
     )
 
 
