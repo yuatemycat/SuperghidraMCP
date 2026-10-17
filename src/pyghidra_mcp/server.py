@@ -14,7 +14,11 @@ from pathlib import Path
 import click
 import pyghidra
 from click_option_group import optgroup
-from mcp.server.mcpserver import MCPServer
+
+try:
+    from mcp.server.mcpserver import MCPServer
+except ImportError:
+    from mcp.server.fastmcp import FastMCP as MCPServer
 
 from pyghidra_mcp import __version__, forks, mcp_tools
 from pyghidra_mcp.context import PyGhidraContext
@@ -116,7 +120,10 @@ async def server_lifespan(server: MCPServer) -> AsyncIterator[MCPContext]:
         pass
 
 
-mcp = MCPServer("pyghidra-mcp", version=__version__, lifespan=server_lifespan)  # type: ignore
+try:
+    mcp = MCPServer("pyghidra-mcp", version=__version__, lifespan=server_lifespan)  # type: ignore
+except TypeError:
+    mcp = MCPServer("pyghidra-mcp", lifespan=server_lifespan)  # type: ignore
 
 
 def register_common_tools(server: MCPServer) -> None:
@@ -143,6 +150,12 @@ def register_common_tools(server: MCPServer) -> None:
     server.tool()(mcp_tools.list_forks)
     server.tool()(mcp_tools.merge_fork)
     server.tool()(mcp_tools.discard_fork)
+    server.tool()(mcp_tools.rva_translate)
+    server.tool()(mcp_tools.gpu_adrp_scan)
+    server.tool()(mcp_tools.gpu_seed_functions)
+    server.tool()(mcp_tools.set_governor_mode)
+    server.tool()(mcp_tools.hibernate)
+    server.tool()(mcp_tools.clear_cache)
 
 
 def register_gui_tools(server: MCPServer) -> None:

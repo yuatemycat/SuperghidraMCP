@@ -307,3 +307,95 @@ class ForkMergeResult(BaseModel):
     counts: dict[str, int]
     entries: list[ForkMergeEntry]
     pending_ops: int
+
+
+class RvaTranslateResult(BaseModel):
+    status: str = "ok"
+    va: str
+    rva: str
+    va_int: int
+    rva_int: int
+    image_base: str
+    time_ms: float
+
+
+class GpuAdrpMatchItem(BaseModel):
+    adrp_index: int
+    adrp_offset: str
+    adrp_pc: str
+    adrp_insn: str
+    adrp_rd: str
+    paired_index: int
+    paired_offset: str
+    paired_pc: str
+    paired_insn: str
+    paired_type: str
+    paired_rn: str
+    paired_rt: str
+    immediate: str
+    resolved_target: str
+    register_matched: bool
+
+
+class GpuAdrpScanResult(BaseModel):
+    status: str = "ok"
+    binary_name: str
+    backend: str
+    total_matches: int
+    matches: list[GpuAdrpMatchItem]
+
+
+class GpuFunctionSeedItem(BaseModel):
+    entry_vaddr: str
+    sources: list[str]
+    confidence: float
+    prologue_type: str
+    caller_count: int
+    callers: list[str]
+    data_ref_count: int
+    data_refs: list[str]
+
+
+class GpuSeedFunctionsResult(BaseModel):
+    status: str = "ok"
+    binary_name: str
+    backend: str
+    total_seeds: int
+    seeds: list[GpuFunctionSeedItem]
+
+
+class GovernorPolicy(BaseModel):
+    mode: str
+    thread_count: int | None = None
+    thread_priority: int | None = None
+    duty_cycle_ms: int | None = None
+    max_native_decompilers: int | None = None
+    decompiler_idle_timeout_sec: int | None = None
+    soft_max_heap_mb: int | None = None
+    zgc_uncommit_delay_sec: int | None = None
+    tiered_stop_at_level: int | None = None
+    default_simplification: str | None = None
+    tier2_downshift: str | None = None
+    tier3_downshift: str | None = None
+    max_payload_mb: int | None = None
+
+
+class GovernorModeResult(BaseModel):
+    status: str = "ok"
+    mode: str
+    message: str | None = None
+    idle_timeout_sec: float | None = None
+    policy: GovernorPolicy | None = None
+
+
+class HibernateResult(BaseModel):
+    status: str = "ok"
+    message: str
+    hibernated: bool = True
+    is_hibernating: bool = True
+
+
+class ClearCacheResult(BaseModel):
+    status: str = "ok"
+    cleared_entries: int
+    message: str

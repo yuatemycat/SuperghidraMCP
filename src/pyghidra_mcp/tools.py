@@ -40,6 +40,7 @@ if typing.TYPE_CHECKING:
     from ghidra.program.model.symbol import Symbol
 
     from .context import ProgramInfo
+    from .l2_cache import L2SQLiteCache
 
 logger = logging.getLogger(__name__)
 DEFAULT_DECOMPILE_TIMEOUT_SECONDS = 30
@@ -80,11 +81,41 @@ def handle_exceptions(func):
 class GhidraTools:
     """Comprehensive tool handler for Ghidra MCP tools"""
 
-    def __init__(self, program_info: "ProgramInfo"):
-        """Initialize with a Ghidra ProgramInfo object"""
+    def __init__(
+        self,
+        program_info: "ProgramInfo",
+        l2_cache: typing.Optional["L2SQLiteCache"] = None,
+    ):
+        """Initialize with a Ghidra ProgramInfo object and optional L2 SQLite cache."""
         self.program_info = program_info
         self.program = program_info.program
         self.decompiler_pool = program_info.decompiler_pool
+        if l2_cache is not None:
+            self.l2_cache = l2_cache
+        elif hasattr(program_info, "l2_cache") and getattr(program_info, "l2_cache") is not None:
+            self.l2_cache = getattr(program_info, "l2_cache")
+        else:
+            from pyghidra_mcp.l2_cache import get_l2_cache
+
+            self.l2_cache = get_l2_cache()
+
+    def evict_function_cache(self, func_or_entry_point: typing.Any) -> int:
+        """Evicts cached decompiler entry for the given function or entry point."""
+        if not hasattr(self, "l2_cache") or self.l2_cache is None:
+            return 0
+        try:
+            if hasattr(func_or_entry_point, "getEntryPoint"):
+                ep = func_or_entry_point.getEntryPoint()
+                ep_str = ep.toString() if hasattr(ep, "toString") else str(ep)
+            elif hasattr(func_or_entry_point, "toString"):
+                ep_str = func_or_entry_point.toString()
+            else:
+                ep_str = str(func_or_entry_point)
+            cache_key = f"{self.program.getName()}:{ep_str}".lower()
+            return self.l2_cache.evict(query_type="decompile", query_key=cache_key)
+        except Exception as e:
+            logger.debug("Failed to evict function cache: %s", e)
+            return 0
 
     def _get_filename(self, func: "Function"):
         max_path_len = 50
@@ -324,10 +355,36 @@ class GhidraTools:
         self, func: "Function", timeout: int = DEFAULT_DECOMPILE_TIMEOUT_SECONDS
     ) -> DecompiledFunction:
         """Decompiles a function in a specified binary and returns its pseudo-C code."""
-        from ghidra.util.task import ConsoleTaskMonitor
-
         if timeout <= 0:
             raise ValueError("Decompiler timeout must be greater than zero")
+
+        cache_key = None
+        if hasattr(self, "program") and self.program is not None and hasattr(func, "getEntryPoint"):
+            try:
+                ep = func.getEntryPoint()
+                ep_str = ep.toString() if hasattr(ep, "toString") else str(ep)
+                cache_key = f"{self.program.getName()}:{ep_str}".lower()
+            except Exception:
+                cache_key = None
+
+        if cache_key and hasattr(self, "l2_cache") and self.l2_cache is not None:
+            cached = self.l2_cache.get("decompile", cache_key)
+            if cached is not None:
+                code = cached.get("code")
+                sig = cached.get("signature")
+                name = cached.get("name")
+                if code is None and "results" in cached and isinstance(cached["results"], list) and cached["results"]:
+                    first = cached["results"][0]
+                    code = first.get("code", "")
+                    sig = first.get("signature")
+                    name = first.get("name")
+                if code is None:
+                    code = ""
+                if name is None:
+                    name = self._get_filename(func)
+                return DecompiledFunction(name=name, code=code, signature=sig)
+
+        from ghidra.util.task import ConsoleTaskMonitor
 
         monitor = ConsoleTaskMonitor()
         deadline = time.monotonic() + timeout
@@ -345,10 +402,26 @@ class GhidraTools:
             else:
                 code = decompiled.getC()
                 sig = decompiled.getSignature()
+            func_name = self._get_filename(func)
+            if cache_key and hasattr(self, "l2_cache") and self.l2_cache is not None:
+                try:
+                    self.l2_cache.put(
+                        "decompile",
+                        cache_key,
+                        {
+                            "status": "ok",
+                            "name": func_name,
+                            "code": code,
+                            "signature": sig,
+                        },
+                    )
+                except Exception as e:
+                    logger.debug("Failed to store decompile result in L2 cache: %s", e)
         else:
             code = result.getErrorMessage()
             sig = None
-        return DecompiledFunction(name=self._get_filename(func), code=code, signature=sig)
+            func_name = self._get_filename(func)
+        return DecompiledFunction(name=func_name, code=code, signature=sig)
 
     @handle_exceptions
     def get_all_functions(self, include_externals=False) -> list["Function"]:
@@ -1004,6 +1077,7 @@ class GhidraTools:
         func = self.find_function(name_or_address)
         old_name = str(func.getName())
         address = str(func.getEntryPoint())
+        self.evict_function_cache(func)
 
         with ghidra_transaction(
             self.program,
@@ -1030,6 +1104,7 @@ class GhidraTools:
         func, variable_kind, variable = self._resolve_function_variable(
             function_name_or_address, variable_name
         )
+        self.evict_function_cache(func)
         old_name = str(variable_name)
         function_name = str(func.getName())
         function_address = str(func.getEntryPoint())
@@ -1061,6 +1136,7 @@ class GhidraTools:
         func, variable_kind, variable = self._resolve_function_variable(
             function_name_or_address, variable_name
         )
+        self.evict_function_cache(func)
         function_name = str(func.getName())
         function_address = str(func.getEntryPoint())
         old_type = str(variable.getDataType().getDisplayName())
@@ -1095,6 +1171,7 @@ class GhidraTools:
         from ghidra.util.task import TaskMonitor
 
         func = self.find_function(function_name_or_address)
+        self.evict_function_cache(func)
         function_name = str(func.getName())
         function_address = str(func.getEntryPoint())
         old_prototype = str(func.getSignature())
@@ -1172,6 +1249,7 @@ class GhidraTools:
         normalized_type = comment_type.lower()
         if normalized_type == "decompiler":
             func = self.find_function(target)
+            self.evict_function_cache(func)
             addr = func.getEntryPoint()
             old_comment = func.getComment()
 
@@ -1191,6 +1269,13 @@ class GhidraTools:
 
         ghidra_comment_type = self._ghidra_comment_type(normalized_type)
         addr = self._resolve_comment_target_address(target)
+        try:
+            func = self.program.getFunctionManager().getFunctionContaining(addr)
+            if func is not None:
+                self.evict_function_cache(func)
+        except Exception:
+            pass
+
         listing = self.program.getListing()
         old_comment = listing.getComment(ghidra_comment_type, addr)
         with ghidra_transaction(
@@ -1212,6 +1297,11 @@ class GhidraTools:
             self.decompiler_pool.invalidate_all()
         except Exception:
             logger.debug("Failed to invalidate decompiler cache", exc_info=True)
+        try:
+            if hasattr(self, "l2_cache") and self.l2_cache is not None:
+                self.l2_cache.evict(query_type="decompile")
+        except Exception:
+            logger.debug("Failed to evict L2 decompiler cache", exc_info=True)
 
     def _parse_address(self, address: str):
         addr_str = address[2:] if address.lower().startswith("0x") else address

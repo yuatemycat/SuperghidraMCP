@@ -29,11 +29,15 @@ async def test_common_tools_register_with_mcp_v2():
 
     tools = await mcp.list_tools()
     assert {tool.name for tool in tools} == {
+        "clear_cache",
         "decompile_function",
         "delete_project_binary",
         "disassemble",
         "discard_fork",
         "gen_callgraph",
+        "gpu_adrp_scan",
+        "gpu_seed_functions",
+        "hibernate",
         "import_binary",
         "list_exports",
         "list_forks",
@@ -45,12 +49,14 @@ async def test_common_tools_register_with_mcp_v2():
         "read_bytes",
         "rename_function",
         "rename_variable",
+        "rva_translate",
         "save",
         "search_code",
         "search_strings",
         "search_symbols_by_name",
         "set_comment",
         "set_function_prototype",
+        "set_governor_mode",
         "set_variable_type",
     }
 
