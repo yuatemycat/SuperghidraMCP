@@ -2545,6 +2545,7 @@ def decode_carchive(
         if cal.get("variable") is not None:
             use_env = {cal["variable"]: cal["value"]}
         cal = {"variable": cal.get("variable"), "value": cal.get("value"),
+               "max_known_threshold": cal.get("max_known_threshold"), "warning": cal.get("warning"),
                "trials": sorted(cal.get("trials", []), key=lambda t: -t["decoded_bytes"])[:10]}
     res = mfc_archive.decode_stream(data, layouts, start=int(offset), env=use_env)
     limit = max(0, min(int(limit), 20000))
@@ -2553,8 +2554,9 @@ def decode_carchive(
         stream_path=str(sp), length=res["length"], layout_binaries=[str(b) for b in bins], layouts=len(layouts),
         env=use_env, calibration=cal, stats=s, map_reliable=res["map_reliable"], classes=res["classes"],
         gaps=res["gaps"], objects=res["objects"][:limit], truncated=len(res["objects"]) > limit,
-        message=(f"{s['decoded']} objects decoded, {s['partial']} partial, {s['opaque']} without layout; "
-                 f"{sum(g['length'] for g in res['gaps'])} of {res['length']} bytes not decoded."),
+        message=(f"{s['decoded']} objects decoded, {s['partial']} partial, {s['opaque']} without layout, "
+                 f"{s.get('error', 0)} malformed; {sum(g['length'] for g in res['gaps'])} of {res['length']} "
+                 f"bytes not decoded." + (f" Warning: {cal['warning']}" if cal and cal.get("warning") else "")),
     )
 
 
