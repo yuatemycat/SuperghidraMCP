@@ -85,6 +85,8 @@ from pyghidra_mcp.models import (
     PreindexDwarfPdbResult,
     InspectBinaryResult,
     RecoverCppClassesResult,
+    TraceSerializeResult,
+    DecodeCArchiveResult,
 )
 
 from pyghidra_mcp.tools import GhidraTools
@@ -2422,6 +2424,137 @@ def recover_cpp_classes(
         message=(f"{counts['mfc']} MFC CRuntimeClass records ({counts['mfc_serializable']} serializable, "
                  f"{sum(1 for c in report.mfc_classes if c.serialize)} with Serialize() resolved) and "
                  f"{counts['rtti']} RTTI classes."),
+    )
+
+
+_TRACER_CACHE: dict[tuple[str, float, int | None], Any] = {}
+
+
+def _serialize_tracer(path: Path, archive_flags: int | None = 0):
+    """SerializeTracer per (file, mtime): class recovery and helper summaries are reused."""
+    _ensure_superghidra_imported()
+    import serialize_trace
+
+    key = (str(path), path.stat().st_mtime, archive_flags)
+    tracer = _TRACER_CACHE.get(key)
+    if tracer is None:
+        if len(_TRACER_CACHE) >= 8:
+            _TRACER_CACHE.pop(next(iter(_TRACER_CACHE)))
+        tracer = serialize_trace.SerializeTracer(str(path), archive_flags=archive_flags)
+        _TRACER_CACHE[key] = tracer
+    return tracer
+
+
+@mcp_error_handler
+def trace_serialize(
+    binary_path: str,
+    class_filter: str | None = None,
+    path: str = "both",
+    binary_format_only: bool = True,
+    limit: int = 200,
+    ctx: Context | None = None,
+) -> TraceSerializeResult:
+    """Recovers the on-disk field layout of every MFC class from its Serialize(CArchive&) code.
+
+    Statically walks each Serialize() of a Windows x86/x64 PE (no Ghidra needed) and lists
+    the archive operations in order for the loading and storing paths: primitive reads and
+    writes (u8..u64, f32/f64) with the C++ member they target (`this+0x40`), CStrings,
+    counts, nested objects (ReadObject/WriteObject), base-class and member Serialize calls,
+    loops (`repeat`), and the branch conditions guarding each field (e.g. file-version
+    checks such as `local->0x780 >= 0x8de`). Works for MFC apps (inline CArchive operators)
+    and frameworks with their own CArchive (e.g. SOLIDWORKS su_CArchive).
+
+    Args:
+        binary_path: Path to the PE file (EXE/DLL).
+        class_filter: Optional case-insensitive substring of class names to trace.
+        path: 'both', 'loading' or 'storing'.
+        binary_format_only: Prune code for alternate archive modes (text/XML) so traces
+            describe the binary format; False keeps them as `archive[...]` gates.
+        limit: Maximum classes returned (totals are always reported).
+    """
+    p = _resolve_safe_path(binary_path, must_exist=True, for_write=False)
+    tracer = _serialize_tracer(p, 0 if binary_format_only else None)
+    needle = (class_filter or "").lower()
+    names = [c.name for c in tracer.report.mfc_classes
+             if c.serializable and c.serialize and (not needle or needle in c.name.lower())]
+    traces = tracer.trace_classes(names)
+    limit = max(0, min(int(limit), 5000))
+    out = []
+    for t in traces[:limit]:
+        d = t.to_dict()
+        for key in ("loading", "storing"):
+            for op in d[key]:
+                op.pop("conditions", None)
+                op.pop("via", None)
+        if path == "loading":
+            d.pop("storing")
+        elif path == "storing":
+            d.pop("loading")
+        out.append(d)
+    mirrored = sum(1 for t in traces if t.mirrored)
+    return TraceSerializeResult(
+        path=str(p), arch=tracer.img.arch, total_traced=len(traces), total_mirrored=mirrored, traces=out,
+        message=(f"Traced {len(traces)} Serialize() functions; {mirrored} have matching load/store paths."),
+    )
+
+
+@mcp_error_handler
+def decode_carchive(
+    stream_path: str,
+    layout_binaries: list[str] | None = None,
+    offset: int = 0,
+    env: dict[str, int] | None = None,
+    calibrate: bool = True,
+    limit: int = 200,
+    ctx: Context | None = None,
+) -> DecodeCArchiveResult:
+    """Decodes an MFC CArchive stream (CObject::Serialize output) into objects and fields.
+
+    Handles MFC's object format exactly (new-class / class-reference / object-reference
+    tags, the load map, big tags, CString incl. UTF-16, counts). Object payloads are decoded
+    with layouts recovered from the writing application's DLLs by trace_serialize (pass them
+    in `layout_binaries`, the main module first, then e.g. mfc140u.dll for inherited MFC
+    collection classes). Classes without a layout are skipped to the next class tag.
+
+    Args:
+        stream_path: Raw stream file (e.g. one extracted from a .SLDPRT container).
+        layout_binaries: PE files whose Serialize() code defines the layouts.
+        offset: Byte offset where archive data starts.
+        env: Values for gate operands, e.g. {"local->0x780": 4050} (a file version).
+        calibrate: When env is empty, infer the most-used gate operand (usually the file
+            version) by trying its thresholds and keeping the best-decoding value.
+        limit: Maximum top-level objects returned.
+    """
+    _ensure_superghidra_imported()
+    import mfc_archive
+
+    sp = _resolve_safe_path(stream_path, must_exist=True, for_write=False)
+    data = sp.read_bytes()
+    bins = [_resolve_safe_path(b, must_exist=True, for_write=False) for b in (layout_binaries or [])]
+    layouts: dict[str, Any] = {}
+    if bins:
+        tracers = [_serialize_tracer(b) for b in bins]
+        layouts = mfc_archive.layouts_from_traces(tracers[0].class_layouts(others=tuple(tracers[1:])))
+        for extra in tracers[1:]:
+            for k, v in mfc_archive.layouts_from_traces(extra.class_layouts()).items():
+                layouts.setdefault(k, v)
+    use_env = dict(env or {})
+    cal = None
+    if not use_env and calibrate and layouts:
+        cal = mfc_archive.calibrate(data, layouts, start=int(offset))
+        if cal.get("variable") is not None:
+            use_env = {cal["variable"]: cal["value"]}
+        cal = {"variable": cal.get("variable"), "value": cal.get("value"),
+               "trials": sorted(cal.get("trials", []), key=lambda t: -t["decoded_bytes"])[:10]}
+    res = mfc_archive.decode_stream(data, layouts, start=int(offset), env=use_env)
+    limit = max(0, min(int(limit), 20000))
+    s = res["stats"]
+    return DecodeCArchiveResult(
+        stream_path=str(sp), length=res["length"], layout_binaries=[str(b) for b in bins], layouts=len(layouts),
+        env=use_env, calibration=cal, stats=s, map_reliable=res["map_reliable"], classes=res["classes"],
+        gaps=res["gaps"], objects=res["objects"][:limit], truncated=len(res["objects"]) > limit,
+        message=(f"{s['decoded']} objects decoded, {s['partial']} partial, {s['opaque']} without layout; "
+                 f"{sum(g['length'] for g in res['gaps'])} of {res['length']} bytes not decoded."),
     )
 
 

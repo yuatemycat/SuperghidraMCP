@@ -65,6 +65,8 @@ async def test_common_tools_register_with_mcp_v2():
         "set_function_prototype",
         "set_governor_mode",
         "set_variable_type",
+        "trace_serialize",
+        "decode_carchive",
         "verify_emulator_memory",
         "verify_smt_equivalence",
     }

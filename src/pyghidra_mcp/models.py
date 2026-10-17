@@ -610,3 +610,33 @@ class RecoverCppClassesResult(BaseModel):
     message: str = ""
 
 
+class TraceSerializeResult(BaseModel):
+    status: str = "ok"
+    path: str
+    arch: str
+    total_traced: int = 0
+    total_mirrored: int = Field(0, description="Classes whose load and store paths perform the same operations")
+    traces: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Per class: function, schema, mirrored, loading/storing ops (kind, size, member, gates, repeat)",
+    )
+    message: str = ""
+
+
+class DecodeCArchiveResult(BaseModel):
+    status: str = "ok"
+    stream_path: str
+    length: int = 0
+    layout_binaries: list[str] = Field(default_factory=list)
+    layouts: int = Field(0, description="Classes with a decode layout")
+    env: dict[str, Any] = Field(default_factory=dict, description="Gate operand values used (e.g. file version)")
+    calibration: dict[str, Any] | None = None
+    stats: dict[str, int] = Field(default_factory=dict)
+    map_reliable: bool = True
+    classes: list[dict[str, Any]] = Field(default_factory=list, description="Classes in the load map, in order")
+    gaps: list[dict[str, Any]] = Field(default_factory=list)
+    objects: list[dict[str, Any]] = Field(default_factory=list)
+    truncated: bool = False
+    message: str = ""
+
+

@@ -56,6 +56,39 @@ def test_inspect_binary_missing_file(tmp_path):
         mcp_tools.inspect_binary(str(tmp_path / "nope.dll"))
 
 
+@pytest.fixture
+def serialize_dll(tmp_path):
+    sys.path.insert(0, SUPERGHIDRA)
+    try:
+        from test_serialize_trace import build_serialize_dll, write_stream
+    finally:
+        sys.path.remove(SUPERGHIDRA)
+    p = tmp_path / "point.dll"
+    p.write_bytes(build_serialize_dll())
+    return p, write_stream
+
+
+def test_trace_serialize(serialize_dll):
+    dll, _ = serialize_dll
+    res = mcp_tools.trace_serialize(str(dll))
+    assert res.total_traced == 1 and res.total_mirrored == 1
+    t = res.traces[0]
+    assert t["class"] == "CPoint3"
+    assert [o["text"] for o in t["storing"]] == ["write u32 <- this+0x8", "write f64  [this+0x18 >= 0x5]"]
+
+
+def test_decode_carchive(serialize_dll, tmp_path):
+    import struct
+
+    dll, write_stream = serialize_dll
+    stream = tmp_path / "stream.bin"
+    stream.write_bytes(write_stream([("CPoint3", 2, struct.pack("<I", 7)), ("CPoint3", 2, struct.pack("<I", 8))]))
+    res = mcp_tools.decode_carchive(str(stream), [str(dll)])
+    assert res.calibration["variable"] == "this+0x18" and res.env["this+0x18"] < 5
+    assert res.stats["decoded"] == 2 and not res.gaps
+    assert [f["value"] for o in res.objects for f in o["fields"]] == [7, 8]
+
+
 def test_recover_cpp_classes(mfc_dll):
     res = mcp_tools.recover_cpp_classes(str(mfc_dll), serializable_only=True)
     assert res.total_serializable == 1
