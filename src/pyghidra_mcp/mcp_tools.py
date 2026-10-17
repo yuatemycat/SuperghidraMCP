@@ -9,10 +9,13 @@ import functools
 import json
 import logging
 import os
+import re
+import struct
 import sys
 import time
 from pathlib import Path
 from typing import Any, Literal, cast
+
 
 try:
     from mcp.server.mcpserver import Context
@@ -69,7 +72,19 @@ from pyghidra_mcp.models import (
     FieldMigrationItem,
     StructInsertionItem,
     MigrateStructShiftsResult,
+    SmtVerificationResult,
+    SyntheticSymbolExportResult,
+    JniMatchItem,
+    ApkJniCrossRefResult,
+    BinaryMatchItem,
+    BinaryDiffResult,
+    EmulatorMemoryVerifyResult,
+    NeuralDecompileSkinResult,
+    MigratedEventRecordItem,
+    MigrateSemanticDeltasResult,
+    PreindexDwarfPdbResult,
 )
+
 from pyghidra_mcp.tools import GhidraTools
 
 logger = logging.getLogger(__name__)
@@ -174,6 +189,101 @@ def mcp_error_handler(func):
             raise handle_error(e) from e
 
     return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
+
+
+def _get_default_ledger_path() -> str:
+    """Returns canonical path to evidence_ledger.json under user data directory."""
+    data_dir = os.environ.get("SUPERGHIDRA_DATA_DIR")
+    if data_dir:
+        base = Path(data_dir)
+    else:
+        base = Path.home() / ".superghidra"
+    return str(base / "evidence_ledger.json")
+
+
+ALLOWED_OUTPUT_EXTENSIONS = {
+    ".debug", ".pdb", ".sym", ".map", ".json", ".py", ".sqlite",
+    ".db", ".sqlite3", ".txt", ".h", ".c", ".cpp", ".log", ".csv",
+    ".bin", ".idx", ".xml", "",
+}
+
+
+def _resolve_safe_path(
+    path: str | Path,
+    must_exist: bool = False,
+    for_write: bool = False,
+    allowed_extensions: set[str] | None = None,
+) -> Path:
+    """Normalizes and safely validates user-supplied paths against traversal and system directories."""
+    if not path or not str(path).strip():
+        raise ValueError("Path must not be empty")
+
+    p = Path(path).resolve()
+
+    # Allowed roots check
+    allowed_roots_env = os.environ.get("SUPERGHIDRA_ALLOWED_ROOTS")
+    if allowed_roots_env:
+        roots = [Path(r.strip()).resolve() for r in allowed_roots_env.split(os.pathsep) if r.strip()]
+        if roots:
+            is_under = False
+            for r in roots:
+                try:
+                    p.relative_to(r)
+                    is_under = True
+                    break
+                except ValueError:
+                    if os.name == "nt" and str(p).lower().startswith(str(r).lower()):
+                        is_under = True
+                        break
+            if not is_under:
+                raise ValueError(f"Path '{p}' is not within SUPERGHIDRA_ALLOWED_ROOTS: {allowed_roots_env}")
+
+    if for_write:
+        if not p.parent.exists():
+            raise ValueError(f"Parent directory does not exist for write: '{p.parent}'")
+
+        # Refuse system directories
+        sys_dirs: list[Path] = []
+        if os.name == "nt":
+            for env_var in ("SystemRoot", "windir", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"):
+                val = os.environ.get(env_var)
+                if val:
+                    sys_dirs.append(Path(val).resolve())
+            sys_dirs.extend([
+                Path(r"C:\Windows").resolve(),
+                Path(r"C:\Program Files").resolve(),
+                Path(r"C:\Program Files (x86)").resolve(),
+            ])
+        else:
+            sys_dirs.extend([
+                Path("/etc").resolve(),
+                Path("/usr").resolve(),
+                Path("/bin").resolve(),
+                Path("/sbin").resolve(),
+            ])
+
+        for sd in sys_dirs:
+            try:
+                p.relative_to(sd)
+                raise ValueError(f"Writing into protected system directory is forbidden: '{p}'")
+            except ValueError:
+                if os.name == "nt" and str(p).lower().startswith(str(sd).lower()):
+                    raise ValueError(f"Writing into protected system directory is forbidden: '{p}'")
+
+        if p.exists():
+            if p.is_dir():
+                raise ValueError(f"Target path for write is an existing directory: '{p}'")
+            valid_exts = allowed_extensions if allowed_extensions is not None else ALLOWED_OUTPUT_EXTENSIONS
+            if p.suffix.lower() not in valid_exts:
+                raise ValueError(f"Refusing to overwrite existing non-output file '{p}' (extension: '{p.suffix}')")
+
+    if must_exist or not for_write:
+        if not p.exists():
+            raise ValueError(f"File does not exist: '{p}'")
+        if not p.is_file():
+            raise ValueError(f"Path is not a regular file: '{p}'")
+
+    return p
 
 
 # MCP Tool Implementations
@@ -755,24 +865,66 @@ def discard_fork(fork_id: str, ctx: Context) -> str:
 
 
 def _get_superghidra_path() -> str:
-    candidates = [
-        r"E:\02_Projects\SuperGhidra",
-        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "SuperGhidra"),
-    ]
-    for c in candidates:
-        if os.path.exists(c):
-            return c
-    return r"E:\02_Projects\SuperGhidra"
+    env_path = os.environ.get("SUPERGHIDRA_PATH")
+    if env_path and os.path.exists(env_path):
+        return env_path
+    repo_sibling = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "SuperGhidra")
+    if os.path.exists(repo_sibling):
+        return repo_sibling
+    fallback = r"E:\02_Projects\SuperGhidra"
+    if os.path.exists(fallback):
+        logger.warning("SUPERGHIDRA_PATH unset; falling back to %s", fallback)
+    return fallback
 
 
 def _ensure_superghidra_imported():
-    sg_path = _get_superghidra_path()
-    if os.path.exists(sg_path) and sg_path not in sys.path:
-        sys.path.insert(0, sg_path)
+    try:
+        import gpu_adrp_scanner  # noqa: F401
+        return
+    except ImportError:
+        pass
+
+    env_path = os.environ.get("SUPERGHIDRA_PATH")
+    if env_path and os.path.exists(env_path):
+        if env_path not in sys.path:
+            sys.path.insert(0, env_path)
+        return
+
+    repo_sibling = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "SuperGhidra")
+    if os.path.exists(repo_sibling):
+        if repo_sibling not in sys.path:
+            sys.path.insert(0, repo_sibling)
+        return
+
+    fallback_path = r"E:\02_Projects\SuperGhidra"
+    if os.path.exists(fallback_path):
+        logger.warning(
+            "SuperGhidra not found on sys.path or SUPERGHIDRA_PATH; falling back to %s",
+            fallback_path,
+        )
+        if fallback_path not in sys.path:
+            sys.path.insert(0, fallback_path)
 
 
-def _get_program_bytes_and_base(program_info: Any) -> tuple[bytes, int]:
-    """Retrieves binary raw bytes and image base vaddr."""
+def _to_ghidra_addr(program: Any, offset: int) -> Any:
+    try:
+        af = program.getAddressFactory()
+        if af:
+            return af.getDefaultAddressSpace().getAddress(offset)
+    except Exception:
+        pass
+    try:
+        ib = program.getImageBase()
+        if ib:
+            return ib.getNewAddress(offset)
+    except Exception:
+        pass
+    return offset
+
+
+def _get_program_executable_segments(program_info: Any) -> list[tuple[bytes, int]]:
+    """Retrieves binary executable segments with exact start virtual addresses to prevent segment VA skew."""
+    segments: list[tuple[bytes, int]] = []
     base_pc = 0x100000
     try:
         if hasattr(program_info, "program") and program_info.program:
@@ -780,23 +932,52 @@ def _get_program_bytes_and_base(program_info: Any) -> tuple[bytes, int]:
     except Exception:
         pass
 
-    file_path = getattr(program_info, "file_path", None)
-    if file_path and os.path.exists(file_path):
-        with open(file_path, "rb") as f:
-            return f.read(), base_pc
-
-    # Fallback to Ghidra initialized memory blocks
-    raw_bytes = bytearray()
     if hasattr(program_info, "program") and program_info.program:
-        mem = program_info.program.getMemory()
-        for block in mem.getBlocks():
-            if block.isExecute() or block.isInitialized():
+        try:
+            mem = program_info.program.getMemory()
+            blocks = list(mem.getBlocks())
+            exec_blocks = [b for b in blocks if hasattr(b, "isExecute") and b.isExecute()]
+            if not exec_blocks:
+                exec_blocks = [b for b in blocks if hasattr(b, "isInitialized") and b.isInitialized()]
+            for block in exec_blocks:
                 sz = block.getSize()
                 if sz > 0:
-                    chunk = bytearray(min(sz, 10 * 1024 * 1024))
+                    chunk = bytearray(min(sz, 50 * 1024 * 1024))
                     read_sz = block.getBytes(block.getStart(), chunk)
-                    raw_bytes.extend(chunk[:read_sz])
-    return bytes(raw_bytes), base_pc
+                    if read_sz > 0:
+                        segments.append((bytes(chunk[:read_sz]), int(block.getStart().getOffset())))
+        except Exception:
+            pass
+
+    if not segments:
+        file_path = getattr(program_info, "file_path", None)
+        if file_path and os.path.exists(file_path):
+            try:
+                raw = Path(file_path).read_bytes()
+                if raw.startswith(b"\x7fELF"):
+                    _ensure_superghidra_imported()
+                    from colab_cloud_orchestrator import ColabCloudOrchestrator
+                    elf_vaddr, elf_exec_bytes = ColabCloudOrchestrator.extract_elf_executable_slice(raw)
+                    if elf_exec_bytes:
+                        segments.append((elf_exec_bytes, elf_vaddr))
+                    else:
+                        segments.append((raw, base_pc))
+                elif raw:
+                    segments.append((raw, base_pc))
+            except Exception:
+                pass
+
+    if not segments:
+        segments.append((b"", base_pc))
+    return segments
+
+
+def _get_program_bytes_and_base(program_info: Any) -> tuple[bytes, int]:
+    """Retrieves binary raw bytes and image base vaddr."""
+    segs = _get_program_executable_segments(program_info)
+    if segs:
+        return segs[0]
+    return b"", 0x100000
 
 
 @mcp_error_handler
@@ -847,47 +1028,129 @@ def rva_translate(addr: str, base: str = "0x100000") -> RvaTranslateResult:
 
 
 @mcp_error_handler
-def gpu_adrp_scan(binary_name: str, ctx: Context, max_matches: int = 100) -> GpuAdrpScanResult:
+def gpu_adrp_scan(
+    binary_name: str,
+    ctx: Context,
+    max_matches: int = 100,
+    apply_xrefs: bool = False,
+) -> GpuAdrpScanResult:
     """Scan candidate ADRP+ADD/LDR pairs in an ARM64 binary using GPU acceleration.
 
     Uses WGPU compute shaders, PyTorch CUDA, or candidate-filtered SIMD/NumPy fallback.
     Args:
         binary_name: Name of the binary to scan.
         max_matches: Maximum number of candidate pairs to return (default: 100).
+        apply_xrefs: If True, writes discovered memory references back into Ghidra program.
     """
     if max_matches <= 0:
         raise ValueError("max_matches must be greater than zero")
 
     pyghidra_context = _get_pyghidra_context(ctx)
     program_info = pyghidra_context.get_program_info(binary_name)
-    raw_bytes, base_pc = _get_program_bytes_and_base(program_info)
-    if not raw_bytes:
+    segments = _get_program_executable_segments(program_info)
+    if not segments or not any(len(s[0]) > 0 for s in segments):
         raise ValueError(f"No executable bytes found for binary '{binary_name}'")
 
     _ensure_superghidra_imported()
     from gpu_adrp_scanner import GPUAdrpScanner
 
     scanner = GPUAdrpScanner(backend="auto")
-    raw_matches = scanner.scan_matches(raw_bytes, base_pc=base_pc, filter_same_register=True)
-    matches = [GpuAdrpMatchItem(**m.to_dict()) for m in raw_matches[:max_matches]]
+    all_raw_matches = []
+    for seg_bytes, seg_base_pc in segments:
+        if seg_bytes:
+            seg_matches = scanner.scan_matches(seg_bytes, base_pc=seg_base_pc, filter_same_register=True)
+            all_raw_matches.extend(seg_matches)
+
+    matches = [GpuAdrpMatchItem(**m.to_dict()) for m in all_raw_matches[:max_matches]]
+
+    applied_xrefs: int | None = None
+    if apply_xrefs:
+        applied_count = 0
+        program = getattr(program_info, "program", None)
+        if program is not None:
+            tx = None
+            commit = False
+            try:
+                if hasattr(program, "startTransaction"):
+                    tx = program.startTransaction("SuperGhidra GPU ADRP XRefs")
+                rm = getattr(program, "getReferenceManager", lambda: None)()
+                ref_type = None
+                source_type = None
+                try:
+                    from ghidra.program.model.symbol import RefType, SourceType
+                    ref_type = RefType.DATA
+                    source_type = SourceType.ANALYSIS
+                except Exception:
+                    pass
+
+                for m in all_raw_matches[:max_matches]:
+                    if rm is not None and hasattr(rm, "addMemoryReference"):
+                        tgt = getattr(m, "resolved_target", getattr(m, "target_address", 0))
+                        apc = getattr(m, "adrp_pc", 0)
+                        if isinstance(apc, str):
+                            apc = int(apc, 16) if apc.startswith("0x") else int(apc)
+                        if isinstance(tgt, str):
+                            tgt = int(tgt, 16) if tgt.startswith("0x") else int(tgt)
+                        from_addr = _to_ghidra_addr(program, int(apc))
+                        to_addr = _to_ghidra_addr(program, int(tgt))
+                        if ref_type is not None and source_type is not None:
+                            try:
+                                rm.addMemoryReference(from_addr, to_addr, ref_type, source_type, 0)
+                            except TypeError:
+                                rm.addMemoryReference(from_addr, to_addr)
+                        else:
+                            rm.addMemoryReference(from_addr, to_addr)
+                        applied_count += 1
+                commit = True
+            except Exception as e:
+                commit = False
+                if tx is not None and hasattr(program, "endTransaction"):
+                    try:
+                        program.endTransaction(tx, False)
+                        tx = None
+                    except Exception:
+                        pass
+                return GpuAdrpScanResult(
+                    status="error",
+                    binary_name=binary_name,
+                    backend=scanner.active_backend,
+                    total_matches=len(all_raw_matches),
+                    matches=matches,
+                    applied_xrefs=0,
+                    message=f"Failed to apply ADRP xrefs: {e}",
+                )
+            finally:
+                if tx is not None and hasattr(program, "endTransaction"):
+                    try:
+                        program.endTransaction(tx, commit)
+                    except Exception:
+                        pass
+        applied_xrefs = applied_count
 
     return GpuAdrpScanResult(
         status="ok",
         binary_name=binary_name,
         backend=scanner.active_backend,
-        total_matches=len(raw_matches),
+        total_matches=len(all_raw_matches),
         matches=matches,
+        applied_xrefs=applied_xrefs,
     )
 
 
 @mcp_error_handler
-def gpu_seed_functions(binary_name: str, ctx: Context, max_functions: int = 500) -> GpuSeedFunctionsResult:
+def gpu_seed_functions(
+    binary_name: str,
+    ctx: Context,
+    max_functions: int = 500,
+    apply_to_program: bool = False,
+) -> GpuSeedFunctionsResult:
     """Recovers function entry points at 100M+ insns/s using GPU-accelerated pattern seeder.
 
     Classifies branch links, prologues (PACIASP, STP x29, x30, SUB sp, BTI), and data pointers.
     Args:
         binary_name: Name of the binary to seed.
         max_functions: Maximum number of recovered function seeds to return (default: 500).
+        apply_to_program: If True, creates newly discovered functions in the Ghidra program.
     """
     if max_functions <= 0:
         raise ValueError("max_functions must be greater than zero")
@@ -896,27 +1159,80 @@ def gpu_seed_functions(binary_name: str, ctx: Context, max_functions: int = 500)
 
     pyghidra_context = _get_pyghidra_context(ctx)
     program_info = pyghidra_context.get_program_info(binary_name)
-    raw_bytes, base_pc = _get_program_bytes_and_base(program_info)
-    if not raw_bytes:
+    segments = _get_program_executable_segments(program_info)
+    if not segments or not any(len(s[0]) > 0 for s in segments):
         raise ValueError(f"No executable bytes found for binary '{binary_name}'")
 
     _ensure_superghidra_imported()
     from gpu_function_seeder import GPUFunctionSeeder
 
     seeder = GPUFunctionSeeder(backend="auto")
-    rem = len(raw_bytes) % 4
-    aligned_bytes = raw_bytes + b"\x00" * (4 - rem) if rem else raw_bytes
-    text_instructions = np.frombuffer(aligned_bytes, dtype="<u4")
+    all_raw_seeds = []
+    for seg_bytes, seg_base_pc in segments:
+        if seg_bytes:
+            rem = len(seg_bytes) % 4
+            aligned_bytes = seg_bytes + b"\x00" * (4 - rem) if rem else seg_bytes
+            text_instructions = np.frombuffer(aligned_bytes, dtype="<u4")
+            seg_seeds = seeder.seed_functions(text_instructions, text_base_vaddr=seg_base_pc)
+            all_raw_seeds.extend(seg_seeds)
 
-    raw_seeds = seeder.seed_functions(text_instructions, text_base_vaddr=base_pc)
-    seeds = [GpuFunctionSeedItem(**s.to_dict()) for s in raw_seeds[:max_functions]]
+    seeds = [GpuFunctionSeedItem(**s.to_dict()) for s in all_raw_seeds[:max_functions]]
+
+    applied_to_program: int | None = None
+    if apply_to_program:
+        applied_count = 0
+        program = getattr(program_info, "program", None)
+        if program is not None:
+            tx = None
+            try:
+                if hasattr(program, "startTransaction"):
+                    tx = program.startTransaction("SuperGhidra GPU Seed Functions")
+                fm = getattr(program, "getFunctionManager", lambda: None)()
+                source_type = None
+                addr_set_cls = None
+                try:
+                    from ghidra.program.model.symbol import SourceType
+                    from ghidra.program.model.address import AddressSet
+                    source_type = SourceType.ANALYSIS
+                    addr_set_cls = AddressSet
+                except Exception:
+                    pass
+
+                for s in all_raw_seeds[:max_functions]:
+                    if fm is not None:
+                        try:
+                            vaddr = getattr(s, "entry_vaddr", getattr(s, "entry_va", 0))
+                            if isinstance(vaddr, str):
+                                vaddr = int(vaddr, 16) if vaddr.startswith("0x") else int(vaddr)
+                            addr = _to_ghidra_addr(program, vaddr)
+                            if hasattr(fm, "getFunctionAt") and fm.getFunctionAt(addr) is not None:
+                                continue
+                            func_name = f"FUN_{vaddr:08x}"
+                            body = addr_set_cls(addr) if addr_set_cls else addr
+                            st = source_type if source_type is not None else "ANALYSIS"
+                            if hasattr(fm, "createFunction"):
+                                try:
+                                    fm.createFunction(func_name, addr, body, st)
+                                except TypeError:
+                                    fm.createFunction(func_name, addr)
+                                applied_count += 1
+                        except Exception:
+                            pass
+            finally:
+                if tx is not None and hasattr(program, "endTransaction"):
+                    try:
+                        program.endTransaction(tx, True)
+                    except Exception:
+                        pass
+        applied_to_program = applied_count
 
     return GpuSeedFunctionsResult(
         status="ok",
         binary_name=binary_name,
         backend=seeder.active_backend,
-        total_seeds=len(raw_seeds),
+        total_seeds=len(all_raw_seeds),
         seeds=seeds,
+        applied_to_program=applied_to_program,
     )
 
 
@@ -1108,3 +1424,897 @@ def migrate_struct_shifts(
         summary=report.summary,
         message=f"Migrated {len(field_migrations)} fields with {report.total_shifts_detected} shifts detected.",
     )
+
+
+@mcp_error_handler
+def verify_smt_equivalence(
+    pcode_or_hex: str,
+    c_code: str,
+    target_reg: str = "x0",
+    param_map: dict[str, str] | None = None,
+    base_pc: int = 0x1000,
+    arch: str = "arm64",
+    ctx: Context | None = None,
+) -> SmtVerificationResult:
+    """Formally proves bit-exact equivalence in Z3 between ARM64/x86_64 machine hex (or P-code JSON) and reconstructed C code.
+
+    Args:
+        pcode_or_hex: Machine instruction hex bytes (e.g. '00 00 80 52 c0 03 5f d6') or serialized P-code JSON.
+        c_code: Reconstructed decompiled C source snippet or statement.
+        target_reg: Name of target register to verify (default: 'x0'; supports x0..x30, w0..w30, d0..d31, s0..s31, rax..r15, eax..r15d, flag_n..flag_v).
+        param_map: Optional variable-to-register parameter mapping: {'player': 'x0', 'damage': 'w2'}.
+        base_pc: Virtual address base for instruction lifting (default: 0x1000).
+        arch: Target architecture for machine hex lifting ('arm64' or 'x86_64', default: 'arm64').
+    """
+    _ensure_superghidra_imported()
+    from smt_pcode_verifier import CCodeParser, CSymbolicEvaluator, SMTPcodeVerifier, SymbolicState
+    from pcode_lifter_bridge import (
+        ARM64PcodeLifter,
+        X86_64PcodeLifter,
+        AddressSpace,
+        PcodeOp,
+        PcodeOpcode,
+        Varnode,
+    )
+
+    verifier = SMTPcodeVerifier()
+    clean_input = pcode_or_hex.strip()
+
+    if clean_input.startswith("[") or clean_input.startswith("{"):
+        raw_ops = json.loads(clean_input)
+        if isinstance(raw_ops, dict):
+            raw_ops = raw_ops.get("pcode_ops", [raw_ops])
+        deserialized_ops: list[PcodeOp] = []
+        for item in raw_ops:
+            if isinstance(item, PcodeOp):
+                deserialized_ops.append(item)
+            elif isinstance(item, dict):
+                op_name = item.get("opcode", "COPY")
+                opcode = PcodeOpcode[op_name] if isinstance(op_name, str) else PcodeOpcode(op_name)
+                inputs = []
+                for v in item.get("inputs", []):
+                    if isinstance(v, Varnode):
+                        inputs.append(v)
+                    else:
+                        sp_val = v.get("space", "ram")
+                        space = AddressSpace(sp_val) if isinstance(sp_val, str) else sp_val
+                        off = v.get("offset", 0)
+                        if isinstance(off, str) and off.startswith("0x"):
+                            off = int(off, 16)
+                        inputs.append(Varnode(space=space, offset=int(off), size=int(v.get("size", 8))))
+                out = None
+                if item.get("output"):
+                    o_val = item["output"]
+                    if isinstance(o_val, Varnode):
+                        out = o_val
+                    else:
+                        sp_val = o_val.get("space", "ram")
+                        space = AddressSpace(sp_val) if isinstance(sp_val, str) else sp_val
+                        off = o_val.get("offset", 0)
+                        if isinstance(off, str) and off.startswith("0x"):
+                            off = int(off, 16)
+                        out = Varnode(space=space, offset=int(off), size=int(o_val.get("size", 8)))
+                pc_val = item.get("pc", 0)
+                if isinstance(pc_val, str) and pc_val.startswith("0x"):
+                    pc_val = int(pc_val, 16)
+                deserialized_ops.append(PcodeOp(opcode=opcode, inputs=inputs, output=out, pc=int(pc_val)))
+        pcode_ops = deserialized_ops
+    else:
+        hex_clean = clean_input.replace(" ", "").replace("0x", "").replace("\n", "").replace("\r", "")
+        raw_bytes = bytes.fromhex(hex_clean)
+        if arch.lower().strip() in ("x86_64", "x64", "amd64", "x86"):
+            lifter: Any = X86_64PcodeLifter()
+        else:
+            lifter = ARM64PcodeLifter()
+        pcode_ops = lifter.lift_block(base_pc, raw_bytes)
+
+    dummy_state = SymbolicState()
+    if param_map:
+        dummy_state.param_map = dict(param_map)
+    resolved = CSymbolicEvaluator()._resolve_var_target(dummy_state, target_reg.strip())
+    if resolved is None:
+        return SmtVerificationResult(
+            status="error",
+            equivalent=False,
+            smt_status="ERROR",
+            details=f"Target register '{target_reg}' could not be resolved",
+            target_reg=target_reg,
+            message=f"Target register '{target_reg}' could not be resolved",
+        )
+    reg_off = resolved[0]
+    tracked_registers = [reg_off]
+
+    norm_c = CCodeParser()._normalize_c_syntax(c_code)
+    has_c_mem = ("->" in c_code) or ("__deref" in norm_c)
+
+    res = verifier.verify_equivalence(
+        pcode_ops=pcode_ops,
+        c_code_or_ast=c_code,
+        param_map=param_map,
+        check_memory=has_c_mem,
+        tracked_registers=tracked_registers,
+    )
+
+    if res.equivalent:
+        smt_desc = "EQUIVALENT (UNSAT)"
+    elif res.status == "UNKNOWN":
+        smt_desc = "UNKNOWN"
+    elif res.status == "SAT":
+        smt_desc = "DIVERGENT (SAT)"
+    else:
+        smt_desc = res.status
+    msg = f"SMT verification: {smt_desc} for register {target_reg}."
+    return SmtVerificationResult(
+        status="ok",
+        equivalent=res.equivalent,
+        smt_status=res.status,
+        details=res.details,
+        obligation_id=res.obligation_id,
+        counterexample=res.counterexample,
+        model_inputs=res.model_inputs,
+        pcode_out=res.pcode_out,
+        c_out=res.c_out,
+        target_reg=target_reg,
+        message=msg,
+    )
+
+
+@mcp_error_handler
+def export_synthetic_symbols(
+    output_base_path: str,
+    formats: list[str] | None = None,
+    ledger_path: str | None = None,
+    symbols_json_path: str | None = None,
+    ctx: Context | None = None,
+) -> SyntheticSymbolExportResult:
+    """Exports DWARF5 (.debug), Microsoft PDB (.pdb), Breakpad (.sym), and .map symbol containers.
+
+    Args:
+        output_base_path: Output base file path without extension.
+        formats: Symbol formats to emit: ['dwarf', 'pdb', 'sym', 'map']. Defaults to all 4.
+        ledger_path: Optional path to evidence_ledger.json.
+        symbols_json_path: Optional path to extra symbols JSON dictionary (_ghidra_names.json).
+    """
+    _ensure_superghidra_imported()
+    from evidence_ledger import ReconstructionObligationLedger
+    from synthetic_symbol_exporter import export_from_ledger
+
+    safe_output_base = str(_resolve_safe_path(output_base_path, must_exist=False, for_write=True))
+
+    ledger_source: Any
+    if ledger_path:
+        safe_ledger = str(_resolve_safe_path(ledger_path, must_exist=True, for_write=False))
+        ledger_source = safe_ledger
+    else:
+        def_ledger = _get_default_ledger_path()
+        ledger_source = ReconstructionObligationLedger(ledger_file=def_ledger)
+
+    extra_symbols = None
+    if symbols_json_path:
+        safe_symbols = _resolve_safe_path(symbols_json_path, must_exist=True, for_write=False)
+        with open(safe_symbols, "r", encoding="utf-8") as f:
+            extra_symbols = json.load(f)
+
+    requested_formats = formats or ["dwarf", "pdb", "sym", "map"]
+    exported = export_from_ledger(
+        ledger_source=ledger_source,
+        output_base=safe_output_base,
+        formats=requested_formats,
+        additional_symbols=extra_symbols,
+    )
+
+    total_syms = 0
+    if extra_symbols:
+        total_syms = len(extra_symbols)
+    elif hasattr(ledger_source, "obligations"):
+        total_syms = len(ledger_source.obligations)
+
+    msg = f"Exported {len(exported)} symbol containers to '{output_base_path}.*'"
+    return SyntheticSymbolExportResult(
+        status="ok",
+        output_base_path=output_base_path,
+        exported_files=exported,
+        formats=list(exported.keys()),
+        total_symbols=total_syms,
+        message=msg,
+    )
+
+
+@mcp_error_handler
+def cross_reference_apk_jni(
+    java_sources: dict[str, str] | None = None,
+    elf_exports: dict[str, int] | None = None,
+    dynamic_registrations: list[dict[str, Any]] | None = None,
+    apk_or_dex_path: str | None = None,
+    so_binary_path: str | None = None,
+    ctx: Context | None = None,
+) -> ApkJniCrossRefResult:
+    """Correlates Java/Kotlin native declarations with ELF .so exports and RegisterNatives tables.
+
+    Args:
+        java_sources: Optional dict mapping class names or file names to Java source code, or JSON method definitions.
+        elf_exports: Optional dictionary mapping exported symbol names to virtual addresses (VA).
+        dynamic_registrations: Optional list of dynamic RegisterNatives entries:
+            [{'method_name': '...', 'signature': '...', 'fn_ptr': 0x...}].
+        apk_or_dex_path: Optional path to Android APK, ZIP, or DEX file.
+        so_binary_path: Optional path to companion ELF shared object (.so) file.
+    """
+    _ensure_superghidra_imported()
+    from apk_jni_cross_referencer import APKJNICrossReferencer, JNIRegisteredNative
+
+    ref = APKJNICrossReferencer(image_base=0x100000, is_64bit=True)
+
+    if apk_or_dex_path:
+        safe_apk = str(_resolve_safe_path(apk_or_dex_path, must_exist=True, for_write=False))
+        ref.load_from_apk_or_dex(safe_apk)
+
+    if so_binary_path:
+        safe_so = _resolve_safe_path(so_binary_path, must_exist=True, for_write=False)
+        with open(safe_so, "rb") as f_so:
+            raw_so = f_so.read()
+        if hasattr(ref, "extract_elf_jni_exports"):
+            ref.extract_elf_jni_exports(raw_so)
+        else:
+            ref.load_from_elf_bytes(raw_so)
+
+    if java_sources:
+        type_map = {
+            "void": "V", "boolean": "Z", "byte": "B", "char": "C", "short": "S",
+            "int": "I", "long": "J", "float": "F", "double": "D", "String": "Ljava/lang/String;",
+        }
+
+        def _type_to_jni(t_str: str) -> str:
+            t = t_str.strip()
+            dims = t.count("[]")
+            t_base = t.replace("[]", "").strip()
+            jni_base = type_map.get(t_base, f"L{t_base.replace('.', '/')};")
+            return ("[" * dims) + jni_base
+
+        for key, content in java_sources.items():
+            stripped = content.strip()
+            if stripped.startswith("["):
+                try:
+                    ref.load_dex_methods_from_json(stripped)
+                    continue
+                except Exception:
+                    pass
+
+            pkg_match = re.search(r"package\s+([\w\.]+);", content)
+            cls_match = re.search(r"(?:public\s+|final\s+|abstract\s+)*class\s+(\w+)", content)
+            pkg = pkg_match.group(1) if pkg_match else ""
+            cls_name = cls_match.group(1) if cls_match else key.replace(".java", "")
+            full_class = f"{pkg}.{cls_name}" if pkg else cls_name
+
+            native_matches = re.finditer(
+                r"(?:public|protected|private)?\s*(?:static\s+)?native\s+([\w<>\[\]]+)\s+(\w+)\s*\(([^)]*)\);",
+                content,
+            )
+            for nm in native_matches:
+                ret_type = nm.group(1)
+                method_name = nm.group(2)
+                raw_args = nm.group(3).strip()
+
+                arg_types = []
+                if raw_args:
+                    for arg_decl in raw_args.split(","):
+                        tokens = arg_decl.strip().split()
+                        if tokens:
+                            arg_types.append(tokens[0])
+
+                ret_jni = _type_to_jni(ret_type)
+                args_jni = "".join(_type_to_jni(a) for a in arg_types)
+                sig = f"({args_jni}){ret_jni}"
+
+                ref.add_java_method(
+                    class_name=full_class,
+                    method_name=method_name,
+                    signature=sig,
+                )
+
+    if elf_exports:
+        ref.load_elf_exports(elf_exports)
+
+    if dynamic_registrations:
+        for idx, reg in enumerate(dynamic_registrations):
+            entry = JNIRegisteredNative(
+                table_address=int(reg.get("table_address", 0x200000)),
+                slot_index=int(reg.get("slot_index", idx)),
+                method_name=str(reg.get("method_name", "")),
+                signature=str(reg.get("signature", "()V")),
+                fn_ptr=int(reg.get("fn_ptr", 0)),
+                class_context=reg.get("class_context"),
+            )
+            ref.registered_natives.append(entry)
+
+    matches = ref.resolve_cross_references()
+    script = ref.export_ghidra_python_script()
+
+    match_items = [
+        JniMatchItem(
+            class_name=m.java_method.class_name,
+            method_name=m.java_method.method_name,
+            signature=m.java_method.signature,
+            binding_type=m.binding_type,
+            symbol_name=m.symbol_name,
+            target_address=hex(m.target_address),
+            target_rva=hex(m.target_rva),
+            confidence=m.confidence,
+        )
+        for m in matches
+    ]
+
+    msg = f"Resolved {len(matches)} JNI cross-references ({len(ref.native_methods)} methods declared)."
+    return ApkJniCrossRefResult(
+        status="ok",
+        total_java_methods=len(ref.native_methods),
+        total_matches=len(matches),
+        matches=match_items,
+        ghidra_script=script,
+        message=msg,
+    )
+
+
+def _parse_functions_for_diff(input_str: str) -> list[Any]:
+    """Parses JSON or raw binary files into a list of FunctionCFG objects for diffing."""
+    _ensure_superghidra_imported()
+    from binary_diff_engine import (
+        FunctionCFG,
+        BasicBlock,
+        InstructionInfo,
+    )
+
+    raw = input_str.strip()
+    data = None
+    is_heuristic = False
+    is_json = raw.startswith("{") or raw.startswith("[")
+
+    if not is_json:
+        safe_path = _resolve_safe_path(raw, must_exist=True, for_write=False)
+        is_binary = False
+        raw_bytes = b""
+        with open(safe_path, "rb") as bf:
+            head = bf.read(4)
+            if head.startswith(b"\x7fELF") or head.startswith(b"MZ") or head.startswith(b"\xca\xfe\xba\xbe"):
+                is_binary = True
+            bf.seek(0)
+            raw_bytes = bf.read()
+
+        if not is_binary:
+            try:
+                data = json.loads(raw_bytes.decode("utf-8"))
+            except Exception:
+                if raw_bytes:
+                    is_binary = True
+
+        if is_binary:
+            import binary_diff_engine
+            if hasattr(binary_diff_engine, "extract_cfgs_from_binary"):
+                return binary_diff_engine.extract_cfgs_from_binary(str(safe_path)), False
+            # Seed CFGs directly from raw binary bytes
+            is_heuristic = True
+            chunk_sz = 256
+            num_chunks = min(64, max(1, len(raw_bytes) // chunk_sz))
+            bin_cfgs: list[FunctionCFG] = []
+            for i in range(num_chunks):
+                chunk = raw_bytes[i * chunk_sz : (i + 1) * chunk_sz]
+                addr = 0x1000 + i * chunk_sz
+                cfg = FunctionCFG(func_id=f"bin_func_{i:03d}", address=addr, name=f"sub_{addr:x}")
+                bb = BasicBlock(start_addr=addr, end_addr=addr + len(chunk))
+                for b_idx in range(0, len(chunk), 4):
+                    slice4 = chunk[b_idx : b_idx + 4]
+                    b0 = slice4[0] if len(slice4) > 0 else 0
+                    if b0 & 0x80:
+                        mnem = "ldr"
+                    elif b0 & 0x40:
+                        mnem = "str"
+                    elif b0 & 0x20:
+                        mnem = "add"
+                    elif b0 & 0x10:
+                        mnem = "cmp"
+                    elif b0 & 0x08:
+                        mnem = "b.eq"
+                    elif b0 & 0x04:
+                        mnem = "ret"
+                    else:
+                        mnem = "mov"
+                    bb.instructions.append(InstructionInfo.create(address=addr + b_idx, mnemonic=mnem))
+                cfg.add_block(bb)
+                bin_cfgs.append(cfg)
+            return bin_cfgs, is_heuristic
+    else:
+        data = json.loads(raw)
+
+    if not isinstance(data, list):
+        data = [data]
+
+    cfgs: list[FunctionCFG] = []
+    for idx, item in enumerate(data):
+        func_id = str(item.get("func_id", item.get("name", f"func_{idx}")))
+        address = int(item.get("address", 0x1000 + idx * 0x100))
+        name = str(item.get("name", func_id))
+        cfg = FunctionCFG(func_id=func_id, address=address, name=name)
+
+        blocks_data = item.get("blocks", [])
+        if not blocks_data:
+            insns_raw = item.get("instructions", ["nop"])
+            bb = BasicBlock(start_addr=address, end_addr=address + len(insns_raw) * 4)
+            for i_idx, insn in enumerate(insns_raw):
+                if isinstance(insn, str):
+                    bb.instructions.append(InstructionInfo.create(address=address + i_idx * 4, mnemonic=insn))
+                elif isinstance(insn, dict):
+                    bb.instructions.append(InstructionInfo.create(
+                        address=insn.get("address", address + i_idx * 4),
+                        mnemonic=insn.get("mnemonic", "nop"),
+                        op_str=insn.get("op_str", "")
+                    ))
+            cfg.add_block(bb)
+        else:
+            for b_item in blocks_data:
+                b_start = int(b_item.get("start_addr", address))
+                b_end = int(b_item.get("end_addr", b_start + 0x20))
+                bb = BasicBlock(start_addr=b_start, end_addr=b_end)
+                for i_idx, insn in enumerate(b_item.get("instructions", [])):
+                    if isinstance(insn, str):
+                        bb.instructions.append(InstructionInfo.create(address=b_start + i_idx * 4, mnemonic=insn))
+                    elif isinstance(insn, dict):
+                        bb.instructions.append(InstructionInfo.create(
+                            address=insn.get("address", b_start + i_idx * 4),
+                            mnemonic=insn.get("mnemonic", "nop"),
+                            op_str=insn.get("op_str", "")
+                        ))
+                cfg.add_block(bb)
+
+        for edge in item.get("edges", []):
+            cfg.add_edge(int(edge[0]), int(edge[1]))
+
+        cfgs.append(cfg)
+    return cfgs, False
+
+
+@mcp_error_handler
+def diff_binaries(
+    v1_functions_json: str,
+    v2_functions_json: str,
+    threshold: float = 0.70,
+    method: str = "mutual_top1",
+    ctx: Context | None = None,
+) -> BinaryDiffResult:
+    """Computes cosine-similarity CFG matches across two JSON-serialized lists of functions.
+
+    Args:
+        v1_functions_json: JSON string or file path containing list of function definitions for Binary 1.
+        v2_functions_json: JSON string or file path containing list of function definitions for Binary 2.
+        threshold: Minimum cosine similarity threshold to declare a match (default: 0.70).
+        method: Matching algorithm: 'mutual_top1' (default) or 'greedy'.
+    """
+    _ensure_superghidra_imported()
+    from binary_diff_engine import BatchedBinaryMatcher
+
+    funcs_a, heur_a = _parse_functions_for_diff(v1_functions_json)
+    funcs_b, heur_b = _parse_functions_for_diff(v2_functions_json)
+    is_heuristic = heur_a or heur_b
+
+    strategy = "mutual" if "mutual" in method.lower() else "greedy"
+    matcher = BatchedBinaryMatcher(threshold=threshold, use_gpu=False)
+    diff_res = matcher.diff_binaries(funcs_a, funcs_b, strategy=strategy)
+
+    match_items = [
+        BinaryMatchItem(
+            func_a_id=m.func_a_id,
+            func_a_name=m.func_a_name,
+            func_a_addr=m.func_a_addr,
+            func_b_id=m.func_b_id,
+            func_b_name=m.func_b_name,
+            func_b_addr=m.func_b_addr,
+            similarity=round(m.similarity, 4),
+            confidence=m.confidence,
+            match_type="heuristic" if is_heuristic else m.match_type,
+        )
+        for m in diff_res.matches
+    ]
+
+    heur_msg = " [heuristic]" if is_heuristic else ""
+    return BinaryDiffResult(
+        status="ok",
+        total_matches=len(match_items),
+        match_rate_pct=round(diff_res.match_rate_pct, 2),
+        avg_similarity=round(diff_res.avg_similarity, 4),
+        execution_time_ms=round(diff_res.execution_time_ms, 3),
+        matches=match_items,
+        unmatched_a=diff_res.unmatched_a,
+        unmatched_b=diff_res.unmatched_b,
+        message=f"Matched {len(match_items)} functions ({diff_res.match_rate_pct:.1f}% match rate){heur_msg}.",
+    )
+
+
+@mcp_error_handler
+def verify_emulator_memory(
+    device_serial: str,
+    action: str = "verify_vtable",
+    rva: str = "0x1000",
+    module_base: str = "0x7000000000",
+    expected_slots: int = 4,
+    expected_type: str = "uint32",
+    key_length: int = 32,
+    pid: int | None = None,
+    target_process: str | None = None,
+    expected_slot_rvas: list[str] | None = None,
+    mock_memory_hex: str | None = None,
+    ctx: Context | None = None,
+) -> EmulatorMemoryVerifyResult:
+    """Enforces android-emulator-fleet-safety and verifies live/mock memory pointers.
+
+    Args:
+        device_serial: Target emulator device serial (e.g. '127.0.0.1:21513', 'emulator-5580').
+        action: Verification action: 'verify_vtable', 'verify_struct_field', or 'extract_dynamic_keys'.
+        rva: Relative virtual address offset (hex string or int, e.g. '0x1000').
+        module_base: Virtual address base of target module (e.g. '0x7000000000').
+        expected_slots: Number of expected vtable slots to verify (for verify_vtable).
+        expected_type: Expected data type for field verification (e.g. 'uint32', 'pointer').
+        key_length: Byte length of dynamic encryption key to extract (default: 32).
+        pid: Optional Windows process ID for Win32ProcessMemoryReader.
+        target_process: Optional process name or ID for FridaMemoryReader.
+        expected_slot_rvas: Optional explicit list of expected vtable slot RVAs.
+        mock_memory_hex: Optional hex string to inject into memory reader before verification.
+    """
+    _ensure_superghidra_imported()
+    from emulator_memory_sidecar import (
+        EmulatorFleetGuard,
+        MockMemoryReader,
+        Win32ProcessMemoryReader,
+        FridaMemoryReader,
+        verify_vtable_pointer,
+        verify_struct_field,
+        extract_dynamic_encryption_keys,
+    )
+
+    # 1. Fleet safety check
+    try:
+        EmulatorFleetGuard.validate_target(device_serial, is_mutation=False, allow_readonly_farm=False)
+    except Exception as e:
+        return EmulatorMemoryVerifyResult(
+            status="violation",
+            device_serial=device_serial,
+            allowed=False,
+            action=action,
+            is_valid=False,
+            details={"error": str(e), "error_type": type(e).__name__},
+            message=f"Fleet safety violation: {e}",
+        )
+
+    rva_int = int(rva, 16) if rva.startswith("0x") else int(rva)
+    base_int = int(module_base, 16) if module_base.startswith("0x") else int(module_base)
+
+    reader = None
+    if pid is not None:
+        try:
+            reader = Win32ProcessMemoryReader(pid, device_serial=device_serial)
+        except Exception as e:
+            return EmulatorMemoryVerifyResult(
+                status="error",
+                device_serial=device_serial,
+                allowed=True,
+                action=action,
+                is_valid=False,
+                details={"error": str(e), "error_type": type(e).__name__},
+                message=f"Failed to open Win32ProcessMemoryReader: {e}",
+            )
+
+    if reader is None and target_process is not None:
+        try:
+            reader = FridaMemoryReader(device_serial=device_serial, target_process=target_process)
+        except Exception as e:
+            return EmulatorMemoryVerifyResult(
+                status="error",
+                device_serial=device_serial,
+                allowed=True,
+                action=action,
+                is_valid=False,
+                details={"error": str(e), "error_type": type(e).__name__},
+                message=f"Failed to open FridaMemoryReader: {e}",
+            )
+
+    if reader is None:
+        if not mock_memory_hex:
+            return EmulatorMemoryVerifyResult(
+                status="error",
+                device_serial=device_serial,
+                allowed=True,
+                action=action,
+                is_valid=False,
+                message="no live reader configured",
+            )
+        reader = MockMemoryReader(default_base=base_int)
+
+    is_mock = isinstance(reader, MockMemoryReader)
+    result_status = "mock" if is_mock else "ok"
+
+    # Inject mock_memory_hex if provided
+    if mock_memory_hex and is_mock:
+        try:
+            raw_hex = mock_memory_hex.replace(" ", "").replace("\n", "").replace("0x", "")
+            parsed_bytes = bytes.fromhex(raw_hex)
+            target_addr = base_int + rva_int
+            in_region = any(base <= target_addr < base + size for base, (size, *_) in reader._regions.items())
+            if not in_region:
+                reg_base = target_addr & ~0xFFF
+                reader.add_region(base=reg_base, size=max(0x100000, len(parsed_bytes) + 0x1000), permissions="rw-")
+            reader.write_memory(target_addr, parsed_bytes)
+        except Exception as e:
+            logger.warning(f"Failed to inject mock_memory_hex: {e}")
+
+    act = action.lower().strip()
+    if act in ("verify_vtable", "vtable"):
+        if expected_slot_rvas is not None:
+            expected_list = expected_slot_rvas
+        else:
+            expected_list = [f"0x{rva_int + 0x100 + i * 0x40:X}" for i in range(expected_slots)]
+
+        res = verify_vtable_pointer(reader, rva=rva_int, expected_slots=expected_list)
+        return EmulatorMemoryVerifyResult(
+            status=result_status,
+            device_serial=device_serial,
+            allowed=True,
+            action=action,
+            is_valid=res.is_valid,
+            details=res.to_dict(),
+            message=res.message,
+        )
+
+    elif act in ("verify_struct_field", "verify_field", "struct_field"):
+        res = verify_struct_field(reader, base_ptr=base_int, offset=rva_int, expected_type=expected_type)
+        return EmulatorMemoryVerifyResult(
+            status=result_status,
+            device_serial=device_serial,
+            allowed=True,
+            action=action,
+            is_valid=res.is_valid,
+            details=res.to_dict(),
+            message=res.message,
+        )
+
+    elif act in ("extract_dynamic_keys", "extract_keys", "dynamic_keys"):
+        res = extract_dynamic_encryption_keys(reader, rva=rva_int, length=key_length)
+        return EmulatorMemoryVerifyResult(
+            status=result_status,
+            device_serial=device_serial,
+            allowed=True,
+            action=action,
+            is_valid=res.is_valid_crypto_key,
+            details=res.to_dict(),
+            message=f"Extracted dynamic key (entropy: {res.entropy:.4f})",
+        )
+
+    return EmulatorMemoryVerifyResult(
+        status="error",
+        device_serial=device_serial,
+        allowed=True,
+        action=action,
+        is_valid=False,
+        message=f"Unknown verification action '{action}'",
+    )
+
+
+@mcp_error_handler
+def neural_decompile_skin(
+    raw_c_code: str,
+    function_address: str = "0x101000",
+    image_base: str = "0x100000",
+    model_name: str = "LLM4Decompile-9b-v2",
+    llm_endpoint: str | None = None,
+    ledger_path: str | None = None,
+    ctx: Context | None = None,
+) -> NeuralDecompileSkinResult:
+    """Coordinates Phase-A skeleton normalization, Phase-B neural skin prediction, and EvidenceLedger invariant gating.
+
+    Args:
+        raw_c_code: Raw decompiler C source code or statement sequence.
+        function_address: Virtual address of the target function (default: '0x101000').
+        image_base: Image base offset of the binary (default: '0x100000').
+        model_name: Identifier of the neural model (default: 'LLM4Decompile-9b-v2').
+        llm_endpoint: Optional local/remote LLM HTTP endpoint URL (e.g. Ollama or vLLM).
+        ledger_path: Optional path to evidence_ledger.json.
+    """
+    _ensure_superghidra_imported()
+    from neural_decompiler_pipeline import NeuralDecompilerPipeline, SkeletonExtractor, LLMDecompilerClient
+    from evidence_ledger import ReconstructionObligationLedger
+
+    func_addr = int(function_address, 16) if function_address.startswith("0x") else int(function_address)
+    base_addr = int(image_base, 16) if image_base.startswith("0x") else int(image_base)
+
+    if ledger_path:
+        safe_ledger = str(_resolve_safe_path(ledger_path, must_exist=True, for_write=False))
+        ledger = ReconstructionObligationLedger(ledger_file=safe_ledger)
+    else:
+        def_ledger = _get_default_ledger_path()
+        ledger = ReconstructionObligationLedger(ledger_file=def_ledger)
+
+    pipeline = NeuralDecompilerPipeline(ledger=ledger)
+    skeleton = SkeletonExtractor.extract_skeleton(raw_c_code, function_address=func_addr, image_base=base_addr)
+
+    llm_client = None
+    if llm_endpoint:
+        llm_client = LLMDecompilerClient(model_name=model_name, endpoint_url=llm_endpoint)
+
+    prediction = pipeline.predict_skin(skeleton, llm_client=llm_client)
+    commit = pipeline.verify_and_commit(skeleton, prediction)
+
+    return NeuralDecompileSkinResult(
+        status="ok",
+        function_address=f"0x{commit.function_address:08X}",
+        function_rva=f"0x{commit.function_rva:08X}",
+        function_name=commit.function_name,
+        return_type=commit.return_type,
+        signature=commit.signature,
+        skeleton_source=skeleton.skeleton_source,
+        verified_struct_fields={f"0x{k:X}": v for k, v in commit.verified_struct_fields.items()},
+        evidence_proof_hashes=commit.evidence_proof_hashes,
+        confidence=round(prediction.confidence, 4),
+        model_identifier=prediction.model_identifier,
+        is_safe_to_commit=commit.is_safe_to_commit,
+        message=f"Neural decompile skin completed: {commit.function_name} ({len(commit.verified_struct_fields)} verified fields)",
+    )
+
+
+@mcp_error_handler
+def migrate_semantic_deltas(
+    delta_log_path: str,
+    old_binary_path: str,
+    new_binary_path: str,
+    output_delta_log_path: str | None = None,
+    threshold: float = 0.70,
+    ctx: Context | None = None,
+) -> MigrateSemanticDeltasResult:
+    """Migrates semantic annotations across binary revisions using batched CFG similarity matching.
+
+    Replays delta logs, translates symbol and address mutations to paired functions,
+    and produces a verified delta log for the new binary.
+
+    Args:
+        delta_log_path: Path to existing semantic delta log (.jsonl).
+        old_binary_path: File path or JSON function list of baseline binary A.
+        new_binary_path: File path or JSON function list of target binary B.
+        output_delta_log_path: Optional path to write migrated delta log (.jsonl).
+        threshold: Minimum cosine similarity threshold (default: 0.70).
+    """
+    _ensure_superghidra_imported()
+    from semantic_delta_log import SemanticDeltaLog, DeltaMigrationEngine
+
+    safe_delta_log = str(_resolve_safe_path(delta_log_path, must_exist=True, for_write=False))
+    delta_log = SemanticDeltaLog(safe_delta_log)
+    baseline_events = delta_log.load()
+
+    funcs_a, _ = _parse_functions_for_diff(old_binary_path)
+    funcs_b, _ = _parse_functions_for_diff(new_binary_path)
+
+    safe_output_delta = None
+    if output_delta_log_path:
+        safe_output_delta = str(_resolve_safe_path(output_delta_log_path, must_exist=False, for_write=True, allowed_extensions={".jsonl", ".json", ".log", ".txt", ".py"}))
+
+    engine = DeltaMigrationEngine(similarity_threshold=threshold)
+    engine.run_diff_pairing(funcs_a, funcs_b)
+
+    report, migrated_events = engine.migrate_events(
+        baseline_events, target_log_path=safe_output_delta
+    )
+
+    record_items = [
+        MigratedEventRecordItem(
+            original_event_id=r.original_event.event_id,
+            event_type=r.original_event.event_type.value,
+            status=r.status.value,
+            similarity=round(float(r.similarity), 4),
+            confidence=r.confidence,
+            match_detail=r.match_detail,
+            migrated_event_id=r.migrated_event.event_id if r.migrated_event else None,
+        )
+        for r in report.records
+    ]
+
+    msg = (
+        f"Migrated {report.migrated_verified_count + report.migrated_unverified_count}/"
+        f"{report.total_baseline_events} events ({report.migration_rate_pct:.1f}% success rate) "
+        f"in {report.elapsed_time_ms:.2f} ms."
+    )
+    return MigrateSemanticDeltasResult(
+        status="ok",
+        total_baseline_events=report.total_baseline_events,
+        migrated_verified_count=report.migrated_verified_count,
+        migrated_unverified_count=report.migrated_unverified_count,
+        skipped_unmatched_count=report.skipped_unmatched_count,
+        evidence_rejected_count=report.evidence_rejected_count,
+        migration_rate_pct=round(report.migration_rate_pct, 2),
+        elapsed_time_ms=round(report.elapsed_time_ms, 2),
+        output_delta_log_path=output_delta_log_path,
+        records=record_items,
+        message=msg,
+    )
+
+
+@mcp_error_handler
+def preindex_dwarf_pdb(
+    binary_or_pdb_path: str,
+    db_output_path: str | None = None,
+    query_symbol_or_type: str | None = None,
+    ctx: Context | None = None,
+) -> PreindexDwarfPdbResult:
+    """Pre-indexes DWARF5 and PDB debug types into an off-heap SQLite database for sub-millisecond querying.
+
+    Args:
+        binary_or_pdb_path: Path to ELF binary, PDB file, or JSON type export.
+        db_output_path: Optional SQLite output path (defaults to in-memory ':memory:').
+        query_symbol_or_type: Optional symbol name or struct/type name to query and render.
+    """
+    _ensure_superghidra_imported()
+    from dwarf_pdb_preindexer import OffHeapTypeStore, TypeDeduplicator, NormalizedType, SymbolRecord
+
+    if db_output_path and db_output_path != ":memory:":
+        safe_db = str(_resolve_safe_path(db_output_path, must_exist=False, for_write=True, allowed_extensions={".sqlite", ".db", ".sqlite3", ".idx", ".bin"}))
+        db_target = safe_db
+    else:
+        db_target = ":memory:"
+
+    safe_bin_path = _resolve_safe_path(binary_or_pdb_path, must_exist=True, for_write=False)
+    store = OffHeapTypeStore(db_target)
+    dedup = TypeDeduplicator()
+
+    with open(safe_bin_path, "rb") as f:
+        raw_bytes = f.read()
+
+    stripped = raw_bytes.strip()
+    path_str = str(safe_bin_path)
+    if stripped.startswith(b"\x7fELF"):
+        store.ingest_dwarf5_elf(raw_bytes, dedup=dedup)
+    elif (
+        stripped.startswith(b"Microsoft C/C++ MSF 7.00")
+        or path_str.lower().endswith(".pdb")
+    ) and hasattr(store, "ingest_pdb"):
+        store.ingest_pdb(raw_bytes)
+    elif stripped.startswith(b"{") or path_str.lower().endswith(".json"):
+        store.load_json(path_str)
+    else:
+        try:
+            store.ingest_dwarf5_elf(raw_bytes, dedup=dedup)
+        except Exception:
+            pass
+
+    cursor = store._conn.cursor()
+    cursor.execute("SELECT count(*) FROM canonical_types")
+    total_types = cursor.fetchone()[0]
+    cursor.execute("SELECT count(*) FROM symbols")
+    total_symbols = cursor.fetchone()[0]
+    cursor.execute("SELECT count(*) FROM struct_members")
+    total_members = cursor.fetchone()[0]
+
+    c_decl: str | None = None
+    matched_syms: list[dict[str, Any]] = []
+
+    if query_symbol_or_type:
+        try:
+            rendered = store.render_c_declaration(query_symbol_or_type)
+            if rendered:
+                c_decl = rendered
+        except Exception:
+            pass
+
+        try:
+            syms = store.lookup_symbols_by_name(query_symbol_or_type)
+            matched_syms = [s.to_dict() for s in syms]
+        except Exception:
+            pass
+
+    msg = f"Indexed {total_types} canonical types, {total_symbols} symbols, and {total_members} members into '{db_target}'."
+    return PreindexDwarfPdbResult(
+        status="ok",
+        input_path=binary_or_pdb_path,
+        db_output_path=db_target,
+        total_canonical_types=total_types,
+        total_symbols=total_symbols,
+        total_struct_members=total_members,
+        query=query_symbol_or_type,
+        c_declaration=c_decl,
+        matched_symbols=matched_syms,
+        message=msg,
+    )
+
+

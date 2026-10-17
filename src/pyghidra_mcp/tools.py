@@ -98,6 +98,29 @@ class GhidraTools:
             from pyghidra_mcp.l2_cache import get_l2_cache
 
             self.l2_cache = get_l2_cache()
+        self._delta_log = None
+        self._delta_log_path = None
+
+    def _record_semantic_delta(self, event_fn_name: str, *args, **kwargs) -> None:
+        """Lazily records a mutation event to the SemanticDeltaLog."""
+        try:
+            from pyghidra_mcp.mcp_tools import _ensure_superghidra_imported
+            _ensure_superghidra_imported()
+            import semantic_delta_log
+
+            if getattr(self, "_delta_log", None) is None:
+                log_path = getattr(self, "_delta_log_path", None)
+                if not log_path:
+                    proj_dir = getattr(self.program_info, "project_location", None) or os.getcwd()
+                    log_path = os.path.join(str(proj_dir), ".ghidra-delta.jsonl")
+                self._delta_log = semantic_delta_log.SemanticDeltaLog(log_path)
+
+            factory = getattr(semantic_delta_log.SemanticEvent, event_fn_name, None)
+            if factory and callable(factory):
+                evt = factory(*args, **kwargs)
+                self._delta_log.append(evt)
+        except Exception as e:
+            logger.debug("Non-fatal: failed to record semantic delta: %s", e)
 
     def evict_function_cache(self, func_or_entry_point: typing.Any) -> int:
         """Evicts cached decompiler entry for the given function or entry point."""
@@ -116,6 +139,32 @@ class GhidraTools:
         except Exception as e:
             logger.debug("Failed to evict function cache: %s", e)
             return 0
+
+    def evict_1hop_callers(self, func: typing.Any) -> int:
+        """Evicts cached decompiler entries for all direct 1-hop callers of func."""
+        evicted = 0
+        try:
+            if not hasattr(self, "program") or self.program is None:
+                return 0
+            if not hasattr(func, "getEntryPoint"):
+                return 0
+            rm = self.program.getReferenceManager()
+            fm = self.program.getFunctionManager()
+            ep = func.getEntryPoint()
+            refs = rm.getReferencesTo(ep)
+            visited_callers = set()
+            for ref in refs:
+                from_addr = ref.getFromAddress()
+                caller_func = fm.getFunctionContaining(from_addr)
+                if caller_func is not None:
+                    c_ep = caller_func.getEntryPoint()
+                    c_key = str(c_ep)
+                    if c_key not in visited_callers and c_key != str(ep):
+                        visited_callers.add(c_key)
+                        evicted += self.evict_function_cache(caller_func)
+        except Exception as e:
+            logger.debug("Failed in evict_1hop_callers: %s", e)
+        return evicted
 
     def _get_filename(self, func: "Function"):
         max_path_len = 50
@@ -393,6 +442,55 @@ class GhidraTools:
             if remaining <= 0:
                 raise TimeoutError(f"Timed out waiting for a decompiler after {timeout} seconds")
             ghidra_timeout = max(1, math.ceil(remaining))
+            # Dynamic complexity downshifting on megafunctions or eco mode
+            try:
+                body_size = (
+                    int(func.getBody().getNumAddresses())
+                    if hasattr(func, "getBody") and func.getBody()
+                    else 0
+                )
+                res_mode = getattr(self.decompiler_pool, "resource_mode", "balanced")
+                if body_size >= 4096 or res_mode == "eco":
+                    try:
+                        from resource_governor import (
+                            DecompilerComplexityGovernor,
+                            get_default_mode_policy,
+                            ResourceMode,
+                        )
+                    except ImportError:
+                        import sys
+                        env_sg = os.environ.get("SUPERGHIDRA_PATH")
+                        if env_sg and os.path.exists(env_sg) and env_sg not in sys.path:
+                            sys.path.insert(0, env_sg)
+                        else:
+                            fallback_sg = r"E:\02_Projects\SuperGhidra"
+                            if os.path.exists(fallback_sg):
+                                logger.warning(
+                                    "SuperGhidra not found on sys.path or SUPERGHIDRA_PATH; falling back to %s",
+                                    fallback_sg,
+                                )
+                                if fallback_sg not in sys.path:
+                                    sys.path.insert(0, fallback_sg)
+                        from resource_governor import (
+                            DecompilerComplexityGovernor,
+                            get_default_mode_policy,
+                            ResourceMode,
+                        )
+
+                    mode_enum = (
+                        ResourceMode.ECO
+                        if res_mode == "eco"
+                        else (ResourceMode.TURBO if res_mode == "turbo" else ResourceMode.BALANCED)
+                    )
+                    policy = get_default_mode_policy(mode_enum)
+                    style = DecompilerComplexityGovernor.resolve_simplification_style(
+                        policy, body_size, max(1, body_size // 32)
+                    )
+                    if hasattr(decompiler, "setSimplificationStyle"):
+                        decompiler.setSimplificationStyle(style)
+            except Exception as e:
+                logger.debug("Complexity downshifting notice: %s", e)
+
             result: DecompileResults = decompiler.decompileFunction(func, ghidra_timeout, monitor)
         if "" == result.getErrorMessage():
             decompiled = result.getDecompiledFunction()
@@ -1078,6 +1176,7 @@ class GhidraTools:
         old_name = str(func.getName())
         address = str(func.getEntryPoint())
         self.evict_function_cache(func)
+        self.evict_1hop_callers(func)
 
         with ghidra_transaction(
             self.program,
@@ -1085,7 +1184,20 @@ class GhidraTools:
         ):
             func.setName(new_name, SourceType.USER_DEFINED)
 
-        self.invalidate_decompiler_cache()
+        addr_int = None
+        try:
+            addr_int = int(str(address), 16) if str(address).startswith("0x") else int(str(address))
+        except Exception:
+            pass
+        self._record_semantic_delta(
+            "create_rename_symbol",
+            old_name=old_name,
+            new_name=new_name,
+            target_address=addr_int,
+            symbol_type="FUNCTION",
+        )
+
+        self.invalidate_decompiler_cache(wipe_l2=False)
         return {
             "address": address,
             "old_name": old_name,
@@ -1114,7 +1226,7 @@ class GhidraTools:
         ):
             variable.setName(new_name, SourceType.USER_DEFINED)
 
-        self.invalidate_decompiler_cache()
+        self.invalidate_decompiler_cache(wipe_l2=False)
         return {
             "function_name": function_name,
             "function_address": function_address,
@@ -1148,7 +1260,7 @@ class GhidraTools:
         ):
             variable.setDataType(data_type, SourceType.USER_DEFINED)
 
-        self.invalidate_decompiler_cache()
+        self.invalidate_decompiler_cache(wipe_l2=False)
         return {
             "function_name": function_name,
             "function_address": function_address,
@@ -1172,6 +1284,7 @@ class GhidraTools:
 
         func = self.find_function(function_name_or_address)
         self.evict_function_cache(func)
+        self.evict_1hop_callers(func)
         function_name = str(func.getName())
         function_address = str(func.getEntryPoint())
         old_prototype = str(func.getSignature())
@@ -1194,7 +1307,21 @@ class GhidraTools:
                 message = cmd.getStatusMsg() or f"Failed to apply function prototype: {prototype}"
                 raise ValueError(message)
 
-        self.invalidate_decompiler_cache()
+        addr_int = None
+        try:
+            addr_int = int(str(function_address), 16) if str(function_address).startswith("0x") else int(str(function_address))
+        except Exception:
+            pass
+        self._record_semantic_delta(
+            "create_set_function_signature",
+            function_name=function_name,
+            return_type="void",
+            parameters=[],
+            function_address=addr_int,
+            metadata={"prototype": prototype},
+        )
+
+        self.invalidate_decompiler_cache(wipe_l2=False)
         return {
             "function_name": function_name,
             "function_address": function_address,
@@ -1259,7 +1386,21 @@ class GhidraTools:
             ):
                 func.setComment(comment)
 
-            self.invalidate_decompiler_cache()
+            addr_int = None
+            try:
+                addr_str = str(addr)
+                addr_int = int(addr_str, 16) if addr_str.startswith("0x") else int(addr_str)
+            except Exception:
+                pass
+            self._record_semantic_delta(
+                "create_set_comment",
+                comment_text=comment,
+                target_address=addr_int,
+                target_symbol=str(func.getName()) if hasattr(func, "getName") else None,
+                comment_type="decompiler",
+            )
+
+            self.invalidate_decompiler_cache(wipe_l2=False)
             return {
                 "address": str(addr),
                 "comment": comment,
@@ -1284,7 +1425,20 @@ class GhidraTools:
         ):
             listing.setComment(addr, ghidra_comment_type, comment)
 
-        self.invalidate_decompiler_cache()
+        addr_int = None
+        try:
+            addr_str = str(addr)
+            addr_int = int(addr_str, 16) if addr_str.startswith("0x") else int(addr_str)
+        except Exception:
+            pass
+        self._record_semantic_delta(
+            "create_set_comment",
+            comment_text=comment,
+            target_address=addr_int,
+            comment_type=normalized_type,
+        )
+
+        self.invalidate_decompiler_cache(wipe_l2=False)
         return {
             "address": str(addr),
             "comment": comment,
@@ -1292,16 +1446,27 @@ class GhidraTools:
             "old_comment": None if old_comment is None else str(old_comment),
         }
 
-    def invalidate_decompiler_cache(self) -> None:
+    def invalidate_decompiler_cache(self, wipe_l2: bool = True) -> None:
         try:
-            self.decompiler_pool.invalidate_all()
+            pool = getattr(self, "decompiler_pool", None)
+            if pool is not None:
+                orig_l2 = getattr(pool, "_l2_cache", None)
+                if not wipe_l2 and orig_l2 is not None:
+                    pool._l2_cache = None
+                    try:
+                        pool.invalidate_all()
+                    finally:
+                        pool._l2_cache = orig_l2
+                else:
+                    pool.invalidate_all()
         except Exception:
             logger.debug("Failed to invalidate decompiler cache", exc_info=True)
-        try:
-            if hasattr(self, "l2_cache") and self.l2_cache is not None:
-                self.l2_cache.evict(query_type="decompile")
-        except Exception:
-            logger.debug("Failed to evict L2 decompiler cache", exc_info=True)
+        if wipe_l2:
+            try:
+                if hasattr(self, "l2_cache") and self.l2_cache is not None:
+                    self.l2_cache.evict(query_type="decompile")
+            except Exception:
+                logger.debug("Failed to evict L2 decompiler cache", exc_info=True)
 
     def _parse_address(self, address: str):
         addr_str = address[2:] if address.lower().startswith("0x") else address
@@ -1359,11 +1524,23 @@ def migrate_struct_shifts(
     original_header: typing.Optional[str] = None,
 ) -> dict[str, typing.Any]:
     """Analyzes two binary versions to discover struct displacement shifts and generate C++ header patches."""
-    import sys
-    sg_path = r"E:\02_Projects\SuperGhidra"
-    if sg_path not in sys.path:
-        sys.path.insert(0, sg_path)
-    from struct_shift_migrator import migrate_struct_shifts as _sg_migrate
+    try:
+        from struct_shift_migrator import migrate_struct_shifts as _sg_migrate
+    except ImportError:
+        import sys
+        env_sg = os.environ.get("SUPERGHIDRA_PATH")
+        if env_sg and os.path.exists(env_sg) and env_sg not in sys.path:
+            sys.path.insert(0, env_sg)
+        else:
+            fallback_sg = r"E:\02_Projects\SuperGhidra"
+            if os.path.exists(fallback_sg):
+                logger.warning(
+                    "SuperGhidra not found on sys.path or SUPERGHIDRA_PATH; falling back to %s",
+                    fallback_sg,
+                )
+                if fallback_sg not in sys.path:
+                    sys.path.insert(0, fallback_sg)
+        from struct_shift_migrator import migrate_struct_shifts as _sg_migrate
     report = _sg_migrate(
         old_binary_path=old_binary_path,
         new_binary_path=new_binary_path,

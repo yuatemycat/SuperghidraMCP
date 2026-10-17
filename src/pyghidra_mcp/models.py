@@ -1,7 +1,8 @@
 from enum import Enum
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
 
 
 class DecompiledFunction(BaseModel):
@@ -342,7 +343,9 @@ class GpuAdrpScanResult(BaseModel):
     binary_name: str
     backend: str
     total_matches: int
-    matches: list[GpuAdrpMatchItem]
+    matches: list[GpuAdrpMatchItem] = Field(default_factory=list)
+    applied_xrefs: int | None = None
+    message: str | None = None
 
 
 class GpuFunctionSeedItem(BaseModel):
@@ -362,6 +365,7 @@ class GpuSeedFunctionsResult(BaseModel):
     backend: str
     total_seeds: int
     seeds: list[GpuFunctionSeedItem]
+    applied_to_program: int | None = None
 
 
 class GovernorPolicy(BaseModel):
@@ -437,3 +441,135 @@ class MigrateStructShiftsResult(BaseModel):
     migration_report_json: str
     summary: str
     message: str
+
+
+class SmtVerificationResult(BaseModel):
+    status: str = "ok"
+    equivalent: bool
+    smt_status: str  # "UNSAT", "SAT", "UNKNOWN", "ERROR"
+    details: str
+    obligation_id: str | None = None
+    counterexample: dict[str, Any] | None = None
+    model_inputs: dict[str, Any] | None = None
+    pcode_out: str | None = None
+    c_out: str | None = None
+    target_reg: str = "x0"
+    message: str
+
+
+class SyntheticSymbolExportResult(BaseModel):
+    status: str = "ok"
+    output_base_path: str
+    exported_files: dict[str, str]
+    formats: list[str]
+    total_symbols: int
+    message: str
+
+
+class JniMatchItem(BaseModel):
+    class_name: str
+    method_name: str
+    signature: str
+    binding_type: str
+    symbol_name: str
+    target_address: str
+    target_rva: str
+    confidence: float
+
+
+class ApkJniCrossRefResult(BaseModel):
+    status: str = "ok"
+    total_java_methods: int
+    total_matches: int
+    matches: list[JniMatchItem]
+    ghidra_script: str
+    message: str
+
+
+class BinaryMatchItem(BaseModel):
+    func_a_id: str
+    func_a_name: str
+    func_a_addr: int
+    func_b_id: str
+    func_b_name: str
+    func_b_addr: int
+    similarity: float
+    confidence: str
+    match_type: str
+
+
+class BinaryDiffResult(BaseModel):
+    status: str = "ok"
+    total_matches: int
+    match_rate_pct: float
+    avg_similarity: float
+    execution_time_ms: float
+    matches: list[BinaryMatchItem]
+    unmatched_a: list[str]
+    unmatched_b: list[str]
+    message: str
+
+
+class EmulatorMemoryVerifyResult(BaseModel):
+    status: str = "ok"
+    device_serial: str
+    allowed: bool
+    action: str
+    is_valid: bool = False
+    details: dict[str, Any] = Field(default_factory=dict)
+    message: str
+
+
+class NeuralDecompileSkinResult(BaseModel):
+    status: str = "ok"
+    function_address: str
+    function_rva: str
+    function_name: str
+    return_type: str
+    signature: str
+    skeleton_source: str
+    verified_struct_fields: dict[str, str]
+    evidence_proof_hashes: list[str]
+    confidence: float
+    model_identifier: str
+    is_safe_to_commit: bool
+    message: str
+
+
+class MigratedEventRecordItem(BaseModel):
+    original_event_id: str
+    event_type: str
+    status: str
+    similarity: float
+    confidence: str
+    match_detail: str
+    migrated_event_id: str | None = None
+
+
+class MigrateSemanticDeltasResult(BaseModel):
+    status: str = "ok"
+    total_baseline_events: int
+    migrated_verified_count: int
+    migrated_unverified_count: int
+    skipped_unmatched_count: int
+    evidence_rejected_count: int
+    migration_rate_pct: float
+    elapsed_time_ms: float
+    output_delta_log_path: str | None = None
+    records: list[MigratedEventRecordItem] = Field(default_factory=list)
+    message: str
+
+
+class PreindexDwarfPdbResult(BaseModel):
+    status: str = "ok"
+    input_path: str
+    db_output_path: str
+    total_canonical_types: int
+    total_symbols: int
+    total_struct_members: int
+    query: str | None = None
+    c_declaration: str | None = None
+    matched_symbols: list[dict[str, Any]] = Field(default_factory=list)
+    message: str
+
+
