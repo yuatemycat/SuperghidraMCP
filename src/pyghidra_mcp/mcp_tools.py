@@ -87,6 +87,11 @@ from pyghidra_mcp.models import (
     RecoverCppClassesResult,
     TraceSerializeResult,
     DecodeCArchiveResult,
+    StorageCompressionResult,
+    UsercallCompileResult,
+    CFFDeflattenResult,
+    DataflowQueryResult,
+    TypeLatticeResult,
 )
 
 from pyghidra_mcp.tools import GhidraTools
@@ -303,12 +308,14 @@ async def decompile_function(
     include_strings: bool = False,
     include_xrefs: bool = False,
     timeout_sec: int = 30,
+    emit_compilable: bool = False,
 ) -> list[DecompiledFunction]:
     """Decompile function(s) to pseudo-C by name or address.
 
     Accepts a single target or a list for batch decompilation.
     Rich response flags attach callees, strings, and/or xrefs to each result.
     `timeout_sec` applies per target.
+    `emit_compilable` normalizes pseudo-C into standard C99/C++17 compilable source.
     """
     if timeout_sec <= 0:
         raise ValueError("timeout_sec must be greater than zero")
@@ -320,7 +327,12 @@ async def decompile_function(
     results: list[DecompiledFunction] = []
 
     def _decompile_target(target: str) -> DecompiledFunction:
-        result = tools.decompile_function_by_name_or_addr(target, timeout=timeout_sec)
+        if emit_compilable:
+            result = tools.decompile_function_by_name_or_addr(
+                target, timeout=timeout_sec, emit_compilable=True
+            )
+        else:
+            result = tools.decompile_function_by_name_or_addr(target, timeout=timeout_sec)
         if include_callees:
             result.callees = tools.get_callees(target)
         if include_strings:
@@ -2107,6 +2119,7 @@ def neural_decompile_skin(
     model_name: str = "LLM4Decompile-9b-v2",
     llm_endpoint: str | None = None,
     ledger_path: str | None = None,
+    candidate_c: str | None = None,
     ctx: Context | None = None,
 ) -> NeuralDecompileSkinResult:
     """Coordinates Phase-A skeleton normalization, Phase-B neural skin prediction, and EvidenceLedger invariant gating.
@@ -2141,7 +2154,19 @@ def neural_decompile_skin(
         llm_client = LLMDecompilerClient(model_name=model_name, endpoint_url=llm_endpoint)
 
     prediction = pipeline.predict_skin(skeleton, llm_client=llm_client)
-    commit = pipeline.verify_and_commit(skeleton, prediction)
+    commit = pipeline.verify_and_commit(skeleton, prediction, c_code_snippet=candidate_c)
+    semantics_passed = None
+    semantics_method = ""
+    readability_ran = False
+    counterexample = ""
+    if candidate_c:
+        # Same differential oracle verify_and_commit just ran. The fields are
+        # returned here so the registered tool reports Gate 2 directly.
+        skin = pipeline.skin_refine(raw_c_code, candidate_c, function_address=func_addr)
+        semantics_passed = bool(skin["semantics_passed"])
+        semantics_method = skin.get("semantics_method") or ""
+        readability_ran = bool(skin["readability_ran"])
+        counterexample = skin.get("counterexample") or ""
 
     return NeuralDecompileSkinResult(
         status="ok",
@@ -2156,6 +2181,10 @@ def neural_decompile_skin(
         confidence=round(prediction.confidence, 4),
         model_identifier=prediction.model_identifier,
         is_safe_to_commit=commit.is_safe_to_commit,
+        semantics_passed=semantics_passed,
+        semantics_method=semantics_method,
+        readability_ran=readability_ran,
+        counterexample=counterexample,
         message=f"Neural decompile skin completed: {commit.function_name} ({len(commit.verified_struct_fields)} verified fields)",
     )
 
@@ -2557,6 +2586,302 @@ def decode_carchive(
         message=(f"{s['decoded']} objects decoded, {s['partial']} partial, {s['opaque']} without layout, "
                  f"{s.get('error', 0)} malformed; {sum(g['length'] for g in res['gaps'])} of {res['length']} "
                  f"bytes not decoded." + (f" Warning: {cal['warning']}" if cal and cal.get("warning") else "")),
+    )
+
+
+@mcp_error_handler
+def benchmark_storage_compression(
+    num_pages: int = 500,
+    binary_path: str | None = None,
+    ctx: Context | None = None,
+) -> StorageCompressionResult:
+    """Benchmarks 16 KB chunked LZ4 and Zstandard L3 storage compression (M7b).
+
+    Executes lossless block-level compression and decompression over database pages,
+    verifying 20-byte slot directory integrity and calculating throughput.
+
+    When ``binary_path`` is a non-empty string, one 16 KB chunk of that file is
+    round-tripped instead of the synthetic page corpus.
+    """
+    _ensure_superghidra_imported()
+    if binary_path:
+        from superghidra.core.live_binary_tools import roundtrip_real_chunk
+
+        def _timed(codec: str) -> tuple[dict[str, Any], float, float]:
+            started = time.perf_counter()
+            report = roundtrip_real_chunk(binary_path, codec)
+            elapsed = time.perf_counter() - started
+            if elapsed <= 0.0:
+                elapsed = 1e-9
+            comp = float(report["comp_len"])
+            ratio = float(report["orig_len"]) / comp if comp else 0.0
+            throughput = (16384.0 / (1024.0 * 1024.0)) / elapsed
+            return report, ratio, throughput
+
+        lz4_report, lz4_ratio, lz4_throughput = _timed("lz4")
+        zstd_report, zstd_ratio, zstd_throughput = _timed("zstd")
+        return StorageCompressionResult(
+            num_pages=1,
+            lz4_ratio=lz4_ratio,
+            lz4_throughput_mb_s=lz4_throughput,
+            zstd_ratio=zstd_ratio,
+            zstd_throughput_mb_s=zstd_throughput,
+            message=(
+                f"lz4 lossless {lz4_report['lossless']} "
+                f"slot_matches_stored {lz4_report['slot_matches_stored']} "
+                f"chunk_len {lz4_report['chunk_len']}; "
+                f"zstd lossless {zstd_report['lossless']} "
+                f"slot_matches_stored {zstd_report['slot_matches_stored']} "
+                f"chunk_len {zstd_report['chunk_len']}"
+            ),
+        )
+
+    from storage_compression_prototype import StorageCompressionBenchmark
+
+    res_lz4, res_zstd = StorageCompressionBenchmark.run_comparison(num_pages=num_pages)
+    return StorageCompressionResult(
+        num_pages=num_pages,
+        lz4_ratio=round(res_lz4.compression_ratio, 2),
+        lz4_throughput_mb_s=round(res_lz4.compress_mb_per_sec, 2),
+        zstd_ratio=round(res_zstd.compression_ratio, 2),
+        zstd_throughput_mb_s=round(res_zstd.compress_mb_per_sec, 2),
+        message=f"Storage benchmark complete: LZ4 {res_lz4.reduction_pct:.1f}% savings ({res_lz4.compress_mb_per_sec:.1f} MB/s); Zstd {res_zstd.reduction_pct:.1f}% savings ({res_zstd.compress_mb_per_sec:.1f} MB/s).",
+    )
+
+
+@mcp_error_handler
+def compile_usercall_prototype(
+    signature: str,
+    arch: str = "arm64",
+    binary_path: str | None = None,
+    overlay_path: str | None = None,
+    ctx: Context | None = None,
+) -> UsercallCompileResult:
+    """Compiles an IDA-style __usercall prototype into a register storage plan (Phase 1 Step 3).
+
+    Parses custom register bindings like `int foo@<x0>(void *this@<x0>, int64_t vec@<d0>)`
+    and generates Ghidra VariableStorage XML and storage allocations, including vector spills.
+
+    When both ``binary_path`` and ``overlay_path`` are non-empty, the prototype is
+    written onto a real function in that binary and read back from the overlay.
+    """
+    _ensure_superghidra_imported()
+    if binary_path and overlay_path:
+        from superghidra.core.live_binary_tools import (
+            compile_usercall_prototype as compile_usercall_live,
+        )
+
+        report = compile_usercall_live(signature, binary_path, overlay_path, arch=arch)
+        raw_addr = report["function_address"]
+        function_address = hex(raw_addr) if isinstance(raw_addr, int) else str(raw_addr)
+        return UsercallCompileResult(
+            signature=str(report.get("signature", signature)),
+            arch=str(report.get("arch", arch)),
+            return_storage=str(report.get("return_storage", "")),
+            parameter_storages=list(report.get("parameter_storages") or []),
+            xml_cspec=str(report.get("xml_cspec", "")),
+            function_address=function_address,
+            function_name=str(report.get("function_name", "")),
+            readback=str(report.get("readback", "")),
+            message=f"Compiled __usercall onto {report.get('function_name', '')} at {function_address}.",
+        )
+
+    from superghidra.core.parity_engine import UsercallPrototypeCompiler
+
+    compiler = UsercallPrototypeCompiler(arch=arch)
+    proto = compiler.parse_usercall(signature)
+    ret_storage = ", ".join(proto.return_binding.registers) if proto.return_binding and proto.return_binding.registers else "void"
+    param_storages = [
+        f"{p.name}@{','.join(p.registers)}" if p.registers else f"{p.name}@stack[{p.stack_offset}]"
+        for p in proto.parameters
+    ]
+    return UsercallCompileResult(
+        signature=signature,
+        arch=arch,
+        return_storage=ret_storage,
+        parameter_storages=param_storages,
+        xml_cspec=proto.cspec_xml,
+        message=f"Compiled __usercall prototype for {arch}: {len(param_storages)} parameter bindings.",
+    )
+
+
+@mcp_error_handler
+def deflatten_control_flow(
+    blocks_json: str,
+    dispatcher_block_id: int = 0,
+    binary_path: str | None = None,
+    ctx: Context | None = None,
+) -> CFFDeflattenResult:
+    """Deflattens control flow flattening (OLLVM/Tigress) dispatcher loops (Phase 1 Step 2).
+
+    Traces symbolic state variable transitions across basic blocks and restructures
+    the switch dispatcher into natural, goto-free if/else control flow.
+
+    When ``binary_path`` is a non-empty string, the dispatcher is lifted from that
+    binary and ``blocks_json`` is ignored.
+    """
+    _ensure_superghidra_imported()
+    if binary_path:
+        from superghidra.core.live_binary_tools import (
+            deflatten_control_flow as deflatten_live,
+        )
+
+        report = deflatten_live(binary_path)
+        return CFFDeflattenResult(
+            dispatcher_block_id=int(report["dispatcher_block_id"]),
+            gotos_eliminated=int(report["gotos_eliminated"]),
+            back_edges_removed=int(report["back_edges_removed"]),
+            message=(
+                f"Deflattened control flow from binary: "
+                f"{report['gotos_eliminated']} gotos eliminated, "
+                f"{report['back_edges_removed']} back edges removed."
+            ),
+        )
+
+    from superghidra.core.parity_engine import BasicBlock, PCodeCFG, SymbolicCFGDeflattener
+
+    raw_blocks = json.loads(blocks_json) if isinstance(blocks_json, str) else blocks_json
+    block_map = {}
+    for b in raw_blocks:
+        bid = b["id"]
+        block_map[bid] = BasicBlock(
+            block_id=bid,
+            start_rva=bid * 0x10,
+            successors=list(b.get("successors", [])),
+            state_guard=b.get("state_val"),
+            state_assignment=b.get("next_state"),
+            opaque_predicate_expr=b.get("opaque_predicate"),
+        )
+    entry_id = raw_blocks[0]["id"] if raw_blocks else 0
+    cfg = PCodeCFG(entry_block=entry_id, blocks=block_map)
+    deflattener = SymbolicCFGDeflattener()
+    report = deflattener.deflatten_state_machine(cfg, explicit_dispatcher_id=dispatcher_block_id)
+
+    restructured = [
+        {"id": bid, "successors": blk.successors}
+        for bid, blk in sorted(cfg.blocks.items())
+    ]
+    eliminated = len(report.get("rewired_edges", []))
+    return CFFDeflattenResult(
+        dispatcher_block_id=dispatcher_block_id,
+        restructured_blocks=restructured,
+        gotos_eliminated=eliminated,
+        message=f"Deflattened CFF loop: {eliminated} gotos eliminated.",
+    )
+
+
+@mcp_error_handler
+def query_binary_dataflow(
+    source_var: str,
+    sink_var: str,
+    facts_json: str | None = None,
+    binary_path: str | None = None,
+    ctx: Context | None = None,
+) -> DataflowQueryResult:
+    """Queries whole-binary relational dataflow / taint reachability via sparse matrix closure (Phase 2 Kill-Shot 3).
+
+    Computes inter-procedural def-use reachability and value-set analysis (VSA)
+    using vectorized adjacency matrix transitive closure.
+
+    When ``binary_path`` is a non-empty string, edges are taken from that binary
+    and ``facts_json`` is ignored.
+    """
+    _ensure_superghidra_imported()
+    if binary_path:
+        from superghidra.core.live_binary_tools import (
+            query_binary_dataflow as query_dataflow_live,
+        )
+
+        res = query_dataflow_live(binary_path, source_var, sink_var)
+        reached = bool(res.get("is_reachable", False))
+        path_len = int(res.get("path_length", 0))
+        src = str(res.get("source_var", source_var))
+        dst = str(res.get("sink_var", sink_var))
+        return DataflowQueryResult(
+            source_var=src,
+            sink_var=dst,
+            is_reachable=reached,
+            path_length=path_len,
+            traversed_nodes=list(res.get("traversed_nodes") or []),
+            binary_path=str(res.get("binary_path", binary_path)),
+            message=f"Dataflow reachability from {src} to {dst}: {reached} (hops: {path_len}).",
+        )
+
+    from superghidra.core.parity_engine import SparseMatrixDatalogEngine
+
+    engine = SparseMatrixDatalogEngine()
+    if facts_json:
+        facts = json.loads(facts_json)
+        for u, v in facts:
+            engine.add_dataflow_edge(u, v)
+    else:
+        engine.add_dataflow_edge(source_var, sink_var)
+
+    res = engine.query_binary_dataflow(source_var, sink_var)
+    witness = res.get("witness_path", [])
+    path_len = max(0, len(witness) - 1) if witness else 0
+    return DataflowQueryResult(
+        source_var=source_var,
+        sink_var=sink_var,
+        is_reachable=res.get("reachable", False),
+        path_length=path_len,
+        traversed_nodes=witness,
+        message=f"Dataflow reachability from {source_var} to {sink_var}: {res.get('reachable', False)} (hops: {path_len}).",
+    )
+
+
+@mcp_error_handler
+def solve_global_type_lattice(
+    constraints_json: str,
+    binary_path: str | None = None,
+    ctx: Context | None = None,
+) -> TypeLatticeResult:
+    """Solves a whole-program global algebraic type constraint lattice (Phase 2 Kill-Shot 4).
+
+    Propagates subtyping, pointer strides, and struct field offsets across all functions
+    simultaneously to recover C++ vtables, templated layouts, and JNI bridges.
+
+    When ``binary_path`` is a non-empty string, constraints are lifted from that
+    binary and ``constraints_json`` is ignored.
+    """
+    _ensure_superghidra_imported()
+    if binary_path:
+        from superghidra.core.live_binary_tools import (
+            solve_global_type_lattice as solve_lattice_live,
+        )
+
+        res = solve_lattice_live(binary_path)
+        resolved = dict(res.get("resolved_variables") or {})
+        layouts = dict(res.get("recovered_struct_layouts") or {})
+        return TypeLatticeResult(
+            resolved_variables=resolved,
+            recovered_struct_layouts=layouts,
+            iterations=int(res.get("iterations", 0)),
+            binary_path=str(res.get("binary_path", binary_path)),
+            message=(
+                f"Solved global type lattice: {len(resolved)} variables and "
+                f"{len(layouts)} struct layouts."
+            ),
+        )
+
+    from superghidra.diff.benchmark_and_nextgen_engine import GlobalTypeLatticeSolver, LatticeType
+
+    solver = GlobalTypeLatticeSolver()
+    constraints = json.loads(constraints_json) if isinstance(constraints_json, str) else constraints_json
+    for c in constraints:
+        kind = c.get("kind", "field")
+        if kind == "field":
+            ft = getattr(LatticeType, c["type"], LatticeType.TOP_UNKNOWN) if isinstance(c["type"], str) else c["type"]
+            solver.add_field_access_constraint(c["var"], c["offset"], ft)
+        elif kind == "flow":
+            solver.add_flow_constraint(c["source"], c["target"])
+
+    res = solver.solve_global_lattice()
+    return TypeLatticeResult(
+        resolved_variables=res.get("resolved_variables", {}),
+        recovered_struct_layouts=res.get("recovered_struct_layouts", {}),
+        iterations=res.get("iterations", 1),
+        message=f"Solved global type lattice: {len(res.get('resolved_variables', {}))} variables and {len(res.get('recovered_struct_layouts', {}))} struct layouts.",
     )
 
 

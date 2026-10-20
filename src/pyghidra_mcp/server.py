@@ -168,6 +168,11 @@ def register_common_tools(server: MCPServer) -> None:
     server.tool()(mcp_tools.trace_serialize)
     server.tool()(mcp_tools.decode_carchive)
     if getattr(server, "name", "") != "pyghidra-mcp-test":
+        server.tool()(mcp_tools.benchmark_storage_compression)
+        server.tool()(mcp_tools.compile_usercall_prototype)
+        server.tool()(mcp_tools.deflatten_control_flow)
+        server.tool()(mcp_tools.query_binary_dataflow)
+        server.tool()(mcp_tools.solve_global_type_lattice)
         server.tool()(mcp_tools.migrate_semantic_deltas)
         server.tool()(mcp_tools.preindex_dwarf_pdb)
 

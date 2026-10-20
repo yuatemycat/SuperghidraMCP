@@ -393,15 +393,21 @@ class GhidraTools:
 
     @handle_exceptions
     def decompile_function_by_name_or_addr(
-        self, name_or_address: str, timeout: int = DEFAULT_DECOMPILE_TIMEOUT_SECONDS
+        self,
+        name_or_address: str,
+        timeout: int = DEFAULT_DECOMPILE_TIMEOUT_SECONDS,
+        emit_compilable: bool = False,
     ) -> DecompiledFunction:
         """Finds and decompiles a function in a specified binary and returns its pseudo-C code."""
 
         func = self.find_function(name_or_address)
-        return self.decompile_function(func, timeout=timeout)
+        return self.decompile_function(func, timeout=timeout, emit_compilable=emit_compilable)
 
     def decompile_function(
-        self, func: "Function", timeout: int = DEFAULT_DECOMPILE_TIMEOUT_SECONDS
+        self,
+        func: "Function",
+        timeout: int = DEFAULT_DECOMPILE_TIMEOUT_SECONDS,
+        emit_compilable: bool = False,
     ) -> DecompiledFunction:
         """Decompiles a function in a specified binary and returns its pseudo-C code."""
         if timeout <= 0:
@@ -500,6 +506,12 @@ class GhidraTools:
             else:
                 code = decompiled.getC()
                 sig = decompiled.getSignature()
+                if emit_compilable and code:
+                    try:
+                        from superghidra.core.compilable_filter import CompilableDecompilerFilter
+                        code = CompilableDecompilerFilter.filter(code, emit_compilable=True)
+                    except Exception as e:
+                        logger.debug("CompilableDecompilerFilter error: %s", e)
             func_name = self._get_filename(func)
             if cache_key and hasattr(self, "l2_cache") and self.l2_cache is not None:
                 try:

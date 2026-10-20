@@ -533,6 +533,10 @@ class NeuralDecompileSkinResult(BaseModel):
     confidence: float
     model_identifier: str
     is_safe_to_commit: bool
+    semantics_passed: bool | None = None
+    semantics_method: str = ""
+    readability_ran: bool = False
+    counterexample: str = ""
     message: str
 
 
@@ -640,3 +644,53 @@ class DecodeCArchiveResult(BaseModel):
     message: str = ""
 
 
+class StorageCompressionResult(BaseModel):
+    status: str = "ok"
+    num_pages: int
+    lz4_ratio: float
+    lz4_throughput_mb_s: float
+    zstd_ratio: float
+    zstd_throughput_mb_s: float
+    message: str = ""
+
+
+class UsercallCompileResult(BaseModel):
+    status: str = "ok"
+    signature: str
+    arch: str
+    return_storage: str
+    parameter_storages: list[str] = Field(default_factory=list)
+    xml_cspec: str = ""
+    function_address: str = ""
+    function_name: str = ""
+    readback: str = ""
+    message: str = ""
+
+
+class CFFDeflattenResult(BaseModel):
+    status: str = "ok"
+    dispatcher_block_id: int
+    restructured_blocks: list[dict[str, Any]] = Field(default_factory=list)
+    gotos_eliminated: int = 0
+    back_edges_removed: int = 0
+    message: str = ""
+
+
+class DataflowQueryResult(BaseModel):
+    status: str = "ok"
+    source_var: str
+    sink_var: str
+    is_reachable: bool
+    path_length: int = 0
+    traversed_nodes: list[str] = Field(default_factory=list)
+    binary_path: str = ""
+    message: str = ""
+
+
+class TypeLatticeResult(BaseModel):
+    status: str = "ok"
+    resolved_variables: dict[str, str] = Field(default_factory=dict)
+    recovered_struct_layouts: dict[str, dict[str, str]] = Field(default_factory=dict)
+    iterations: int = 0
+    binary_path: str = ""
+    message: str = ""

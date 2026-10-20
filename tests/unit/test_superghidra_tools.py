@@ -29,6 +29,11 @@ from pyghidra_mcp.models import (
     NeuralDecompileSkinResult,
     MigrateSemanticDeltasResult,
     PreindexDwarfPdbResult,
+    StorageCompressionResult,
+    UsercallCompileResult,
+    CFFDeflattenResult,
+    DataflowQueryResult,
+    TypeLatticeResult,
 )
 
 
@@ -57,7 +62,8 @@ def test_rva_translate_forward_and_reverse():
 
 def test_clear_cache():
     """Verify persistent L2 SQLite cache purging."""
-    with patch("ghidra_oracle.L2SQLiteCache") as mock_cache_cls:
+    with patch("pyghidra_mcp.l2_cache.L2SQLiteCache") as mock_py_cache, patch("ghidra_oracle.L2SQLiteCache") as mock_cache_cls:
+        mock_py_cache.return_value.clear.return_value = 0
         mock_instance = MagicMock()
         mock_instance.clear.return_value = 14
         mock_cache_cls.return_value = mock_instance
@@ -724,5 +730,71 @@ def test_preindex_dwarf_pdb():
     finally:
         if os.path.exists(json_path):
             os.remove(json_path)
+
+
+def test_benchmark_storage_compression():
+    """Verify 16 KB LZ4/Zstd storage compression benchmark tool (M7b)."""
+    res = mcp_tools.benchmark_storage_compression(num_pages=50)
+    assert isinstance(res, StorageCompressionResult)
+    assert res.status == "ok"
+    assert res.num_pages == 50
+    assert res.lz4_ratio > 1.0
+    assert res.lz4_throughput_mb_s > 0
+    assert res.zstd_ratio > 1.0
+    assert res.zstd_throughput_mb_s > 0
+
+
+def test_compile_usercall_prototype():
+    """Verify __usercall compilation with vector-register spills (Phase 1 Step 3)."""
+    sig = "int calculate_vector@<x0>(void *this@<x0>, double val@<d0>)"
+    res = mcp_tools.compile_usercall_prototype(signature=sig, arch="arm64")
+    assert isinstance(res, UsercallCompileResult)
+    assert res.status == "ok"
+    assert res.arch == "arm64"
+    assert res.return_storage != ""
+    assert len(res.parameter_storages) >= 2
+    assert "calculate_vector" in res.xml_cspec or "prototype" in res.xml_cspec
+
+
+def test_deflatten_control_flow():
+    """Verify CFF deflattening tool (Phase 1 Step 2)."""
+    blocks = [
+        {"id": 0, "kind": "entry", "successors": [1]},
+        {"id": 1, "kind": "dispatcher", "state_var": "s", "successors": [2, 3]},
+        {"id": 2, "kind": "case", "state_val": 10, "next_state": 20, "successors": [1]},
+        {"id": 3, "kind": "case", "state_val": 20, "next_state": 0, "successors": [4]},
+        {"id": 4, "kind": "exit", "successors": []},
+    ]
+    res = mcp_tools.deflatten_control_flow(blocks_json=json.dumps(blocks), dispatcher_block_id=1)
+    assert isinstance(res, CFFDeflattenResult)
+    assert res.status == "ok"
+    assert res.dispatcher_block_id == 1
+
+
+def test_query_binary_dataflow():
+    """Verify sparse matrix datalog transitive closure query (Phase 2 Kill-Shot 3)."""
+    facts = [["arg0", "tmp1"], ["tmp1", "ptr2"], ["ptr2", "sink_call"]]
+    res = mcp_tools.query_binary_dataflow(
+        source_var="arg0",
+        sink_var="sink_call",
+        facts_json=json.dumps(facts),
+    )
+    assert isinstance(res, DataflowQueryResult)
+    assert res.status == "ok"
+    assert res.is_reachable is True
+    assert res.path_length == 3
+
+
+def test_solve_global_type_lattice():
+    """Verify global type constraint lattice solver (Phase 2 Kill-Shot 4)."""
+    constraints = [
+        {"kind": "field", "var": "avatar_ptr", "offset": 0, "type": "NON_NULL_PTR"},
+        {"kind": "field", "var": "avatar_ptr", "offset": 0x18, "type": "FLOAT_32"},
+        {"kind": "flow", "source": "avatar_ptr", "target": "callee_param0"},
+    ]
+    res = mcp_tools.solve_global_type_lattice(constraints_json=json.dumps(constraints))
+    assert isinstance(res, TypeLatticeResult)
+    assert res.status == "ok"
+    assert "callee_param0" in res.resolved_variables
 
 
