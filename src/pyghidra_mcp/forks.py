@@ -385,6 +385,81 @@ def discard_fork(pyghidra_mcp_dir: Path, fork_id: str) -> dict[str, Any]:
     return info
 
 
+def prune_forks(
+    pyghidra_mcp_dir: Path,
+    *,
+    dry_run: bool = False,
+    max_age_hours: float = 168.0,
+    include_unmerged: bool = False,
+) -> dict[str, Any]:
+    """Automated fork garbage collection to reclaim storage:
+    1. Prunes dead, fully-merged forks (pending_ops == 0 and alive == False).
+    2. Prunes dead abandoned forks (alive == False) older than max_age_hours if include_unmerged=True.
+    Never deletes an active/live fork process.
+    """
+    root = forks_root(pyghidra_mcp_dir)
+    if not root.is_dir():
+        return {"scanned": 0, "pruned": [], "bytes_reclaimed": 0, "dry_run": dry_run}
+
+    all_forks = list_forks(pyghidra_mcp_dir)
+    now = datetime.now(timezone.utc)
+    pruned_summary = []
+    total_bytes = 0
+
+    for f_info in all_forks:
+        fid = f_info["fork_id"]
+        if f_info.get("alive") is not False:
+            continue
+
+        pending = f_info.get("pending_ops", 0)
+        fork_path = Path(f_info["path"])
+
+        should_prune = False
+        reason = ""
+
+        if pending == 0:
+            should_prune = True
+            reason = "fully_merged_and_dead"
+        elif include_unmerged:
+            created_str = f_info.get("created_at")
+            if created_str:
+                try:
+                    created_dt = datetime.fromisoformat(created_str)
+                    age_hours = (now - created_dt).total_seconds() / 3600.0
+                    if age_hours >= max_age_hours:
+                        should_prune = True
+                        reason = f"expired_stale_unmerged ({age_hours:.1f}h >= {max_age_hours:.1f}h)"
+                except Exception:
+                    pass
+
+        if should_prune:
+            size_bytes = 0
+            try:
+                for p in fork_path.rglob("*"):
+                    if p.is_file():
+                        size_bytes += p.stat().st_size
+            except OSError:
+                pass
+
+            if not dry_run:
+                shutil.rmtree(fork_path, ignore_errors=True)
+
+            total_bytes += size_bytes
+            pruned_summary.append({
+                "fork_id": fid,
+                "reason": reason,
+                "reclaimed_bytes": size_bytes,
+                "path": str(fork_path),
+            })
+
+    return {
+        "scanned": len(all_forks),
+        "pruned": pruned_summary,
+        "bytes_reclaimed": total_bytes,
+        "dry_run": dry_run,
+    }
+
+
 # Merge
 # ---------------------------------------------------------------------------------
 

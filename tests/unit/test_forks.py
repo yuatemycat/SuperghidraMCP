@@ -550,3 +550,17 @@ def test_create_project_context_retries_a_fork_that_fails_to_open(tmp_path, monk
     remaining = forks.list_forks(parent.pyghidra_mcp_dir)
     assert [info["fork_id"] for info in remaining] == [context.fork_session.fork_id]
     assert not (context.fork_session.project_spec.pyghidra_mcp_dir / "chromadb").exists()
+
+
+def test_prune_forks_reclaims_dead_merged_and_expired(tmp_path):
+    parent = _make_parent_project(tmp_path)
+    fork_a = forks.create_fork(parent, label="merged_dead")
+    fork_a.mark("closed")
+    # write merge state with 0 pending
+    merge_state = {"resolved": {}, "merges": []}
+    forks._write_json(fork_a.fork_dir / forks.MERGE_STATE_FILE, merge_state)
+
+    res = forks.prune_forks(parent.pyghidra_mcp_dir)
+    assert res["scanned"] >= 1
+    assert any(p["fork_id"] == fork_a.fork_id for p in res["pruned"])
+    assert not fork_a.fork_dir.exists()

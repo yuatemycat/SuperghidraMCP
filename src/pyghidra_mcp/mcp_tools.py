@@ -845,11 +845,14 @@ def merge_fork(
     ctx: Context,
     dry_run: bool = False,
     on_conflict: Literal["skip", "overwrite"] = "skip",
+    auto_discard: bool = False,
 ) -> ForkMergeResult:
     """Replay a fork's journaled edits into this (primary) project.
 
     Edits whose target also changed here since the fork are conflicts: skipped,
     or forced with on_conflict="overwrite". Re-running only retries unresolved edits.
+    If `auto_discard=True` and all edits are resolved cleanly (`pending_ops == 0`),
+    the fork directory is automatically deleted to reclaim disk storage.
     """
     pyghidra_context = _get_pyghidra_context(ctx)
     if _fork_session(pyghidra_context) is not None:
@@ -862,7 +865,10 @@ def merge_fork(
         GhidraTools,
         run=lambda fn: _run_for_context(pyghidra_context, fn),
     )
-    return ForkMergeResult(**merger.merge(fork_id, dry_run=dry_run, on_conflict=on_conflict))
+    result = merger.merge(fork_id, dry_run=dry_run, on_conflict=on_conflict)
+    if auto_discard and not dry_run and result.get("pending_ops", 0) == 0:
+        forks.discard_fork(_forks_dir(pyghidra_context), fork_id)
+    return ForkMergeResult(**result)
 
 
 @mcp_error_handler

@@ -451,7 +451,7 @@ class PyGhidraMcpClient:
         return self._extract_result(result)
 
     async def merge_fork(
-        self, fork_id: str, dry_run: bool = False, on_conflict: str = "skip"
+        self, fork_id: str, dry_run: bool = False, on_conflict: str = "skip", auto_discard: bool = False
     ) -> dict[str, Any]:
         """Replay a fork's journaled edits into the primary project."""
         if not self._connected:
@@ -459,7 +459,20 @@ class PyGhidraMcpClient:
 
         result = await self._session.call_tool(
             "merge_fork",
-            {"fork_id": fork_id, "dry_run": dry_run, "on_conflict": on_conflict},
+            {"fork_id": fork_id, "dry_run": dry_run, "on_conflict": on_conflict, "auto_discard": auto_discard},
+        )
+        return self._extract_result(result)
+
+    async def prune_forks(
+        self, dry_run: bool = False, max_age_hours: float = 168.0, include_unmerged: bool = False
+    ) -> dict[str, Any]:
+        """Prune dead and merged forks to reclaim disk storage."""
+        if not self._connected:
+            raise ClientError("Not connected")
+
+        result = await self._session.call_tool(
+            "prune_forks",
+            {"dry_run": dry_run, "max_age_hours": max_age_hours, "include_unmerged": include_unmerged},
         )
         return self._extract_result(result)
 
