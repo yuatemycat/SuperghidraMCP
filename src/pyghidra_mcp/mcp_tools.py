@@ -1986,7 +1986,7 @@ def verify_emulator_memory(
 
     # 1. Fleet safety check
     try:
-        EmulatorFleetGuard.validate_target(device_serial, is_mutation=False, allow_readonly_farm=False)
+        EmulatorFleetGuard.validate_target(device_serial, is_mutation=False, allow_readonly_live=False)
     except Exception as e:
         return EmulatorMemoryVerifyResult(
             status="violation",

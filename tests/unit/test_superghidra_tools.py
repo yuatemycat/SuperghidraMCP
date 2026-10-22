@@ -103,7 +103,7 @@ def test_set_governor_mode():
         "idle_timeout_sec": 0.0,
         "message": "Decompiler pool resource mode updated to 'turbo'",
     }
-    mock_ctx.request_context.lifespan_context.open_programs = {"libg.so": mock_pinfo}
+    mock_ctx.request_context.lifespan_context.open_programs = {"libtarget.so": mock_pinfo}
 
     res = mcp_tools.set_governor_mode("turbo", mock_ctx)
     assert isinstance(res, GovernorModeResult)
@@ -355,13 +355,13 @@ def test_verify_emulator_memory_and_fleet_safety():
     assert res_memu0.allowed is False
     assert "DO NOT TOUCH" in res_memu0.message
 
-    # 2. Fleet safety: emulator-5564 (live farm automation) MUST be rejected without allow_readonly_farm
-    res_farm = mcp_tools.verify_emulator_memory(
+    # 2. Fleet safety: emulator-5564 (live automation) MUST be rejected without allow_readonly_live
+    res_live = mcp_tools.verify_emulator_memory(
         device_serial="emulator-5564",
         action="verify_vtable",
     )
-    assert res_farm.status == "violation"
-    assert res_farm.allowed is False
+    assert res_live.status == "violation"
+    assert res_live.allowed is False
 
     # 3. Authorized target: 127.0.0.1:21513 (MEmu_1) with verify_vtable
     slots_hex = b"".join(struct.pack("<Q", 0x7000000000 + 0x1000 + 0x100 + i * 0x40) for i in range(4)).hex()
