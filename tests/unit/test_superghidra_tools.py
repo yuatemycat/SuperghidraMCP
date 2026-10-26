@@ -62,7 +62,8 @@ def test_rva_translate_forward_and_reverse():
 
 def test_clear_cache():
     """Verify persistent L2 SQLite cache purging."""
-    with patch("pyghidra_mcp.l2_cache.L2SQLiteCache") as mock_py_cache, patch("ghidra_oracle.L2SQLiteCache") as mock_cache_cls:
+    mcp_tools._ensure_superghidra_imported()
+    with patch("pyghidra_mcp.l2_cache.L2SQLiteCache") as mock_py_cache, patch("superghidra.core.ghidra_oracle.L2SQLiteCache") as mock_cache_cls:
         mock_py_cache.return_value.clear.return_value = 0
         mock_instance = MagicMock()
         mock_instance.clear.return_value = 14
@@ -593,7 +594,7 @@ def test_gpu_seed_functions_multi_segment_and_apply():
 def test_cross_reference_apk_jni_binary_dex_and_elf():
     """Verify cross_reference_apk_jni using synthetic DEX bytes and JNI ELF exports."""
     mcp_tools._ensure_superghidra_imported()
-    from apk_jni_cross_referencer import APKJNICrossReferencer
+    from superghidra.integrations.apk_jni_cross_referencer import APKJNICrossReferencer
 
     dex_bytes = APKJNICrossReferencer.build_synthetic_dex_bytes([
         ("com/example/game/NativeBridge", "calculateCombatScore", "(II)I", 0x101)
@@ -632,7 +633,7 @@ def test_cross_reference_apk_jni_binary_dex_and_elf():
 def test_migrate_semantic_deltas():
     """Verify migrating semantic deltas across binary revisions via CFG similarity."""
     mcp_tools._ensure_superghidra_imported()
-    from semantic_delta_log import SemanticDeltaLog, SemanticEvent
+    from superghidra.diff.semantic_delta_log import SemanticDeltaLog, SemanticEvent
 
     with tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False) as f_log:
         log_path = f_log.name

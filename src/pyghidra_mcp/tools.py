@@ -106,7 +106,7 @@ class GhidraTools:
         try:
             from pyghidra_mcp.mcp_tools import _ensure_superghidra_imported
             _ensure_superghidra_imported()
-            import semantic_delta_log
+            from superghidra.diff import semantic_delta_log
 
             if getattr(self, "_delta_log", None) is None:
                 log_path = getattr(self, "_delta_log_path", None)
@@ -458,7 +458,7 @@ class GhidraTools:
                 res_mode = getattr(self.decompiler_pool, "resource_mode", "balanced")
                 if body_size >= 4096 or res_mode == "eco":
                     try:
-                        from resource_governor import (
+                        from superghidra.core.resource_governor import (
                             DecompilerComplexityGovernor,
                             get_default_mode_policy,
                             ResourceMode,
@@ -477,7 +477,7 @@ class GhidraTools:
                                 )
                                 if fallback_sg not in sys.path:
                                     sys.path.insert(0, fallback_sg)
-                        from resource_governor import (
+                        from superghidra.core.resource_governor import (
                             DecompilerComplexityGovernor,
                             get_default_mode_policy,
                             ResourceMode,
@@ -1537,7 +1537,7 @@ def migrate_struct_shifts(
 ) -> dict[str, typing.Any]:
     """Analyzes two binary versions to discover struct displacement shifts and generate C++ header patches."""
     try:
-        from struct_shift_migrator import migrate_struct_shifts as _sg_migrate
+        from superghidra.diff.struct_shift_migrator import migrate_struct_shifts as _sg_migrate
     except ImportError:
         import sys
         env_sg = os.environ.get("SUPERGHIDRA_PATH")
@@ -1552,7 +1552,7 @@ def migrate_struct_shifts(
                 )
                 if fallback_sg not in sys.path:
                     sys.path.insert(0, fallback_sg)
-        from struct_shift_migrator import migrate_struct_shifts as _sg_migrate
+        from superghidra.diff.struct_shift_migrator import migrate_struct_shifts as _sg_migrate
     report = _sg_migrate(
         old_binary_path=old_binary_path,
         new_binary_path=new_binary_path,

@@ -899,33 +899,34 @@ def _get_superghidra_path() -> str:
     return fallback
 
 
+def _add_superghidra_dir(p: str):
+    src_dir = os.path.join(p, "src")
+    if os.path.exists(src_dir) and src_dir not in sys.path:
+        sys.path.insert(0, src_dir)
+    if os.path.exists(p) and p not in sys.path:
+        sys.path.insert(0, p)
+
+
 def _ensure_superghidra_imported():
     try:
-        import gpu_adrp_scanner  # noqa: F401
+        from superghidra.acceleration import gpu_adrp_scanner  # noqa: F401
         return
     except ImportError:
         pass
 
     env_path = os.environ.get("SUPERGHIDRA_PATH")
     if env_path and os.path.exists(env_path):
-        if env_path not in sys.path:
-            sys.path.insert(0, env_path)
+        _add_superghidra_dir(env_path)
         return
 
     repo_sibling = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "SuperGhidra")
     if os.path.exists(repo_sibling):
-        if repo_sibling not in sys.path:
-            sys.path.insert(0, repo_sibling)
+        _add_superghidra_dir(repo_sibling)
         return
 
     fallback_path = r"E:\02_Projects\SuperGhidra"
     if os.path.exists(fallback_path):
-        logger.warning(
-            "SuperGhidra not found on sys.path or SUPERGHIDRA_PATH; falling back to %s",
-            fallback_path,
-        )
-        if fallback_path not in sys.path:
-            sys.path.insert(0, fallback_path)
+        _add_superghidra_dir(fallback_path)
 
 
 def _to_ghidra_addr(program: Any, offset: int) -> Any:
@@ -978,7 +979,7 @@ def _get_program_executable_segments(program_info: Any) -> list[tuple[bytes, int
                 raw = Path(file_path).read_bytes()
                 if raw.startswith(b"\x7fELF"):
                     _ensure_superghidra_imported()
-                    from colab_cloud_orchestrator import ColabCloudOrchestrator
+                    from superghidra.integrations.colab_cloud_orchestrator import ColabCloudOrchestrator
                     elf_vaddr, elf_exec_bytes = ColabCloudOrchestrator.extract_elf_executable_slice(raw)
                     if elf_exec_bytes:
                         segments.append((elf_exec_bytes, elf_vaddr))
@@ -1074,7 +1075,7 @@ def gpu_adrp_scan(
         raise ValueError(f"No executable bytes found for binary '{binary_name}'")
 
     _ensure_superghidra_imported()
-    from gpu_adrp_scanner import GPUAdrpScanner
+    from superghidra.acceleration.gpu_adrp_scanner import GPUAdrpScanner
 
     scanner = GPUAdrpScanner(backend="auto")
     all_raw_matches = []
@@ -1186,7 +1187,7 @@ def gpu_seed_functions(
         raise ValueError(f"No executable bytes found for binary '{binary_name}'")
 
     _ensure_superghidra_imported()
-    from gpu_function_seeder import GPUFunctionSeeder
+    from superghidra.acceleration.gpu_function_seeder import GPUFunctionSeeder
 
     seeder = GPUFunctionSeeder(backend="auto")
     all_raw_seeds = []
@@ -1292,7 +1293,7 @@ def set_governor_mode(
     try:
         _ensure_superghidra_imported()
         import dataclasses
-        from resource_governor import ResourceMode, get_default_mode_policy
+        from superghidra.core.resource_governor import ResourceMode, get_default_mode_policy
 
         pol = get_default_mode_policy(ResourceMode(mode_str), logical_cores=os.cpu_count() or 8)
         pol_dict = dataclasses.asdict(pol)
@@ -1351,7 +1352,7 @@ def clear_cache(ctx: Context | None = None) -> ClearCacheResult:
         logger.debug("PyGhidraL2Cache.clear() notice: %s", e)
 
     try:
-        from ghidra_oracle import L2SQLiteCache
+        from superghidra.core.ghidra_oracle import L2SQLiteCache
 
         cache = L2SQLiteCache()
         deleted += cache.clear()
@@ -1393,7 +1394,7 @@ def migrate_struct_shifts(
         original_header: Optional existing C++ header source to patch.
     """
     _ensure_superghidra_imported()
-    from struct_shift_migrator import migrate_struct_shifts as _sg_migrate
+    from superghidra.diff.struct_shift_migrator import migrate_struct_shifts as _sg_migrate
 
     report = _sg_migrate(
         old_binary_path=old_binary_path,
@@ -1469,8 +1470,8 @@ def verify_smt_equivalence(
         arch: Target architecture for machine hex lifting ('arm64' or 'x86_64', default: 'arm64').
     """
     _ensure_superghidra_imported()
-    from smt_pcode_verifier import CCodeParser, CSymbolicEvaluator, SMTPcodeVerifier, SymbolicState
-    from pcode_lifter_bridge import (
+    from superghidra.lifters.smt_pcode_verifier import CCodeParser, CSymbolicEvaluator, SMTPcodeVerifier, SymbolicState
+    from superghidra.lifters.pcode_lifter_bridge import (
         ARM64PcodeLifter,
         X86_64PcodeLifter,
         AddressSpace,
@@ -1598,8 +1599,8 @@ def export_synthetic_symbols(
         symbols_json_path: Optional path to extra symbols JSON dictionary (_ghidra_names.json).
     """
     _ensure_superghidra_imported()
-    from evidence_ledger import ReconstructionObligationLedger
-    from synthetic_symbol_exporter import export_from_ledger
+    from superghidra.core.evidence_ledger import ReconstructionObligationLedger
+    from superghidra.formats.synthetic_symbol_exporter import export_from_ledger
 
     safe_output_base = str(_resolve_safe_path(output_base_path, must_exist=False, for_write=True))
 
@@ -1662,7 +1663,7 @@ def cross_reference_apk_jni(
         so_binary_path: Optional path to companion ELF shared object (.so) file.
     """
     _ensure_superghidra_imported()
-    from apk_jni_cross_referencer import APKJNICrossReferencer, JNIRegisteredNative
+    from superghidra.integrations.apk_jni_cross_referencer import APKJNICrossReferencer, JNIRegisteredNative
 
     ref = APKJNICrossReferencer(image_base=0x100000, is_64bit=True)
 
@@ -1779,7 +1780,7 @@ def cross_reference_apk_jni(
 def _parse_functions_for_diff(input_str: str) -> list[Any]:
     """Parses JSON or raw binary files into a list of FunctionCFG objects for diffing."""
     _ensure_superghidra_imported()
-    from binary_diff_engine import (
+    from superghidra.diff.binary_diff_engine import (
         FunctionCFG,
         BasicBlock,
         InstructionInfo,
@@ -1809,7 +1810,7 @@ def _parse_functions_for_diff(input_str: str) -> list[Any]:
                     is_binary = True
 
         if is_binary:
-            import binary_diff_engine
+            from superghidra.diff import binary_diff_engine
             if hasattr(binary_diff_engine, "extract_cfgs_from_binary"):
                 return binary_diff_engine.extract_cfgs_from_binary(str(safe_path)), False
             # Seed CFGs directly from raw binary bytes
@@ -1910,7 +1911,7 @@ def diff_binaries(
         method: Matching algorithm: 'mutual_top1' (default) or 'greedy'.
     """
     _ensure_superghidra_imported()
-    from binary_diff_engine import BatchedBinaryMatcher
+    from superghidra.diff.binary_diff_engine import BatchedBinaryMatcher
 
     funcs_a, heur_a = _parse_functions_for_diff(v1_functions_json)
     funcs_b, heur_b = _parse_functions_for_diff(v2_functions_json)
@@ -1980,7 +1981,7 @@ def verify_emulator_memory(
         mock_memory_hex: Optional hex string to inject into memory reader before verification.
     """
     _ensure_superghidra_imported()
-    from emulator_memory_sidecar import (
+    from superghidra.integrations.emulator_memory_sidecar import (
         EmulatorFleetGuard,
         MockMemoryReader,
         Win32ProcessMemoryReader,
@@ -2139,8 +2140,8 @@ def neural_decompile_skin(
         ledger_path: Optional path to evidence_ledger.json.
     """
     _ensure_superghidra_imported()
-    from neural_decompiler_pipeline import NeuralDecompilerPipeline, SkeletonExtractor, LLMDecompilerClient
-    from evidence_ledger import ReconstructionObligationLedger
+    from superghidra.integrations.neural_decompiler_pipeline import NeuralDecompilerPipeline, SkeletonExtractor, LLMDecompilerClient
+    from superghidra.core.evidence_ledger import ReconstructionObligationLedger
 
     func_addr = int(function_address, 16) if function_address.startswith("0x") else int(function_address)
     base_addr = int(image_base, 16) if image_base.startswith("0x") else int(image_base)
@@ -2217,7 +2218,7 @@ def migrate_semantic_deltas(
         threshold: Minimum cosine similarity threshold (default: 0.70).
     """
     _ensure_superghidra_imported()
-    from semantic_delta_log import SemanticDeltaLog, DeltaMigrationEngine
+    from superghidra.diff.semantic_delta_log import SemanticDeltaLog, DeltaMigrationEngine
 
     safe_delta_log = str(_resolve_safe_path(delta_log_path, must_exist=True, for_write=False))
     delta_log = SemanticDeltaLog(safe_delta_log)
@@ -2285,7 +2286,7 @@ def preindex_dwarf_pdb(
         query_symbol_or_type: Optional symbol name or struct/type name to query and render.
     """
     _ensure_superghidra_imported()
-    from dwarf_pdb_preindexer import OffHeapTypeStore, TypeDeduplicator, NormalizedType, SymbolRecord
+    from superghidra.formats.dwarf_pdb_preindexer import OffHeapTypeStore, TypeDeduplicator, NormalizedType, SymbolRecord
 
     if db_output_path and db_output_path != ":memory:":
         safe_db = str(_resolve_safe_path(db_output_path, must_exist=False, for_write=True, allowed_extensions={".sqlite", ".db", ".sqlite3", ".idx", ".bin"}))
@@ -2378,7 +2379,7 @@ def inspect_binary(
         prefer_arch: For universal Mach-O files, the slice to load (e.g. 'arm64', 'x86_64').
     """
     _ensure_superghidra_imported()
-    import binary_loader
+    from superghidra.formats import binary_loader
 
     path = _resolve_safe_path(binary_path, must_exist=True, for_write=False)
     img = binary_loader.load_binary(str(path), prefer_arch=prefer_arch)
@@ -2440,7 +2441,7 @@ def recover_cpp_classes(
         limit: Maximum classes returned per list (totals are always reported).
     """
     _ensure_superghidra_imported()
-    import msvc_class_recovery
+    from superghidra.formats import msvc_class_recovery
 
     path = _resolve_safe_path(binary_path, must_exist=True, for_write=False)
     report = msvc_class_recovery.recover_classes(str(path), rtti=include_rtti)
@@ -2468,7 +2469,7 @@ _TRACER_CACHE: dict[tuple[str, float, int | None], Any] = {}
 def _serialize_tracer(path: Path, archive_flags: int | None = 0):
     """SerializeTracer per (file, mtime): class recovery and helper summaries are reused."""
     _ensure_superghidra_imported()
-    import serialize_trace
+    from superghidra.formats import serialize_trace
 
     key = (str(path), path.stat().st_mtime, archive_flags)
     tracer = _TRACER_CACHE.get(key)
@@ -2561,7 +2562,7 @@ def decode_carchive(
         limit: Maximum top-level objects returned.
     """
     _ensure_superghidra_imported()
-    import mfc_archive
+    from superghidra.formats import mfc_archive
 
     sp = _resolve_safe_path(stream_path, must_exist=True, for_write=False)
     data = sp.read_bytes()
@@ -2642,7 +2643,7 @@ def benchmark_storage_compression(
             ),
         )
 
-    from storage_compression_prototype import StorageCompressionBenchmark
+    from superghidra.storage.storage_compression_prototype import StorageCompressionBenchmark
 
     res_lz4, res_zstd = StorageCompressionBenchmark.run_comparison(num_pages=num_pages)
     return StorageCompressionResult(

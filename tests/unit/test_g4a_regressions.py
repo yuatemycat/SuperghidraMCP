@@ -140,7 +140,7 @@ def test_5_jni_cross_reference_parses_all_sources():
 def test_6_diff_binaries_heuristic_labeling():
     """Bug 6: Raw binary byte disassembly must be labeled heuristic in response."""
     mcp_tools._ensure_superghidra_imported()
-    import binary_diff_engine
+    from superghidra.diff import binary_diff_engine
 
     raw_elf = b"\x7fELF" + bytes([0x80, 0x40, 0x20, 0x04]) * 64
     with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as f1:
@@ -185,7 +185,7 @@ def test_7_gpu_adrp_scan_error_path_rolls_back_and_returns_error():
     mock_rm.addMemoryReference.side_effect = RuntimeError("Hardware database write failure")
     mock_program.getReferenceManager.return_value = mock_rm
 
-    with patch("gpu_adrp_scanner.GPUAdrpScanner") as mock_scanner_cls:
+    with patch("superghidra.acceleration.gpu_adrp_scanner.GPUAdrpScanner") as mock_scanner_cls:
         mock_scanner = MagicMock()
         mock_match = MagicMock()
         mock_match.to_dict.return_value = {
