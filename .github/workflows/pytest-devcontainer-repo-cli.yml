@@ -80,7 +80,7 @@ jobs:
           uv sync --extra dev
 
           # Override PyPI pyghidra-mcp with the local repo version
-          uv pip install --reinstall --no-deps -e /workspaces/pyghidra-mcp
+          uv pip install --reinstall --no-deps -e ..
 
           # Run CLI tests using the CLI's test approach
           UV_NO_SYNC=1 uv run pytest tests/unit/ -v --doctest-modules --junitxml=junit/unit-test-results-${{ matrix.image }}.xml

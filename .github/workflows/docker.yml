@@ -17,6 +17,8 @@ jobs:
     if: ${{ !contains(github.event.pull_request.labels.*.name, 'no-build') }}
     name: Build Docker image (ghcr.io/clearbluejar/pyghidra-mcp)
     runs-on: ubuntu-latest
+    env:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
     permissions:
       contents: read
       packages: write
@@ -37,7 +39,7 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Log in to Docker Hub
-        if: ${{ github.event_name != 'pull_request' && secrets.DOCKERHUB_USERNAME != '' }}
+        if: ${{ github.event_name != 'pull_request' && env.DOCKERHUB_USERNAME != '' }}
         uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
         with:
           registry: docker.io
@@ -52,7 +54,7 @@ jobs:
         with:
           images: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-            docker.io/${{ env.IMAGE_NAME }}
+            ${{ env.DOCKERHUB_USERNAME != '' && format('docker.io/{0}', env.IMAGE_NAME) || '' }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -88,7 +90,7 @@ jobs:
           subject-digest: ${{ steps.push.outputs.digest }}     
 
       - name: Generate artifact attestation (Docker Hub)
-        if: ${{ github.event_name != 'pull_request' }}
+        if: ${{ github.event_name != 'pull_request' && env.DOCKERHUB_USERNAME != '' }}
         uses: actions/attest-build-provenance@c074443f1aee8d4aeeae555aebba3282517141b2 # v2.2.3
         with:
           subject-name: docker.io/${{ env.IMAGE_NAME }}

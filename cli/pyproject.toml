@@ -21,7 +21,7 @@ dev = [
     "ruff>=0.11.4",
     "pyright>=1.1.0",
     "tomli>=2.0.1",
-    "pyghidra-mcp>=0.2.7",
+    "superghidra-mcp>=0.4.0",
     "pre-commit>=3.0.0",
 ]
 
@@ -44,7 +44,7 @@ target-version = "py310"
 line-length = 120
 
 [tool.uv.sources]
-pyghidra-mcp = { path = "..", editable = true }
+superghidra-mcp = { path = "..", editable = true }
 
 [tool.ruff.lint]
 ignore = ["E501", "B017", "E402", "F821"]
