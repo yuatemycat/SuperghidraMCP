@@ -279,12 +279,32 @@ class PyGhidraContext(IndexingMixin):
         if locator.exists():
             logger.info(f"Opening existing project: {self.project_name}")
             try:
+                lock_file = locator.getProjectLockFile()
+                if lock_file is not None and lock_file.exists():
+                    raise ProjectLockedError(
+                        f"Ghidra project '{self.project_name}' in {project_dir_str} is locked by "
+                        "another process: lock file exists"
+                    )
+            except ProjectLockedError:
+                raise
+            except Exception:
+                pass
+
+            try:
                 return GhidraProject.openProject(project_dir_str, self.project_name, True)
             except LockException as e:
                 raise ProjectLockedError(
                     f"Ghidra project '{self.project_name}' in {project_dir_str} is locked by "
                     f"another process: {e.getMessage()}"
                 ) from None
+            except Exception as e:
+                err_msg = str(e).lower()
+                if "lock" in err_msg or "already in use" in err_msg or "in use" in err_msg:
+                    raise ProjectLockedError(
+                        f"Ghidra project '{self.project_name}' in {project_dir_str} is locked by "
+                        f"another process: {e}"
+                    ) from None
+                raise
         else:
             logger.info(f"Creating new project: {self.project_name}")
             return GhidraProject.createProject(project_dir_str, self.project_name, False)
