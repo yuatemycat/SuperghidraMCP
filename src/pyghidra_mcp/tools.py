@@ -5,6 +5,7 @@ Comprehensive tool implementations for pyghidra-mcp.
 import functools
 import logging
 import math
+import os
 import re
 import threading
 import time
@@ -469,14 +470,20 @@ class GhidraTools:
                         if env_sg and os.path.exists(env_sg) and env_sg not in sys.path:
                             sys.path.insert(0, env_sg)
                         else:
-                            fallback_sg = r"E:\02_Projects\SuperGhidra"
-                            if os.path.exists(fallback_sg):
-                                logger.warning(
-                                    "SuperGhidra not found on sys.path or SUPERGHIDRA_PATH; falling back to %s",
-                                    fallback_sg,
-                                )
-                                if fallback_sg not in sys.path:
-                                    sys.path.insert(0, fallback_sg)
+                            candidates = [
+                                os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../SuperGhidra")),
+                                os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../SuperGhidra/src")),
+                                r"E:\02_Projects\SuperGhidra",
+                            ]
+                            for cand in candidates:
+                                if os.path.exists(cand):
+                                    logger.warning(
+                                        "SuperGhidra not found on sys.path or SUPERGHIDRA_PATH; falling back to %s",
+                                        cand,
+                                    )
+                                    if cand not in sys.path:
+                                        sys.path.insert(0, cand)
+                                    break
                         from superghidra.core.resource_governor import (
                             DecompilerComplexityGovernor,
                             ResourceMode,
@@ -1321,7 +1328,8 @@ class GhidraTools:
 
         addr_int = None
         try:
-            addr_int = int(str(function_address), 16) if str(function_address).startswith("0x") else int(str(function_address))
+            s_addr = str(function_address)
+            addr_int = int(s_addr, 16) if s_addr.startswith("0x") else int(s_addr)
         except Exception:
             pass
         self._record_semantic_delta(
@@ -1544,14 +1552,20 @@ def migrate_struct_shifts(
         if env_sg and os.path.exists(env_sg) and env_sg not in sys.path:
             sys.path.insert(0, env_sg)
         else:
-            fallback_sg = r"E:\02_Projects\SuperGhidra"
-            if os.path.exists(fallback_sg):
-                logger.warning(
-                    "SuperGhidra not found on sys.path or SUPERGHIDRA_PATH; falling back to %s",
-                    fallback_sg,
-                )
-                if fallback_sg not in sys.path:
-                    sys.path.insert(0, fallback_sg)
+            candidates = [
+                os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "SuperGhidra")),
+                os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "SuperGhidra", "src")),
+                r"E:\02_Projects\SuperGhidra",
+            ]
+            for cand in candidates:
+                if os.path.exists(cand):
+                    logger.warning(
+                        "SuperGhidra not found on sys.path or SUPERGHIDRA_PATH; falling back to %s",
+                        cand,
+                    )
+                    if cand not in sys.path:
+                        sys.path.insert(0, cand)
+                    break
         from superghidra.diff.struct_shift_migrator import migrate_struct_shifts as _sg_migrate
     report = _sg_migrate(
         old_binary_path=old_binary_path,

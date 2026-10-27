@@ -47,7 +47,7 @@ line-length = 120
 superghidra-mcp = { path = "..", editable = true }
 
 [tool.ruff.lint]
-ignore = ["E501", "B017", "E402", "F821"]
+ignore = ["E402"]
 select = [
     "E",
     "F",

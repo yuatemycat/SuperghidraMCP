@@ -104,7 +104,6 @@ def pid_alive(pid: int | None) -> bool:
         kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
         process_query_limited_information = 0x1000
         still_active = 259
-        error_access_denied = 5
 
         handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
         if not handle:

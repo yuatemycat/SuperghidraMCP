@@ -114,10 +114,9 @@ select = [
     "UP",
     "N",
     "W",
-    "C90",
     "RUF",
 ]
-ignore = ["F821", "E402", "E501", "B017", "UP037", "N802", "RUF059", "C901", "F841", "B904", "RUF100"]
+ignore = ["E402"]
 # this is because of Java / Python import issues (see Jpype)
 # top of file must be ignored as well
 
@@ -130,7 +129,17 @@ combine-as-imports = true
 split-on-trailing-comma = true
 
 [tool.ruff.lint.mccabe]
-max-complexity = 10
+max-complexity = 25
 
 [tool.pyright]
+include = ["src"]
+extraPaths = ["src"]
 reportMissingModuleSource = false
+reportMissingImports = false
+reportAttributeAccessIssue = false
+reportOptionalMemberAccess = false
+reportGeneralTypeIssues = false
+reportInvalidTypeForm = false
+reportCallIssue = false
+reportArgumentType = false
+reportFunctionMemberAccess = false

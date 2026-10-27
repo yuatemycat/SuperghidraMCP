@@ -35,6 +35,5 @@ jobs:
           pip install ghidra-stubs
           pip install -e .
       - name: Run Pyright
-        continue-on-error: true
         run: |
           pyright src/

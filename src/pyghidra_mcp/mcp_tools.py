@@ -278,7 +278,7 @@ def _resolve_safe_path(
                 raise ValueError(f"Writing into protected system directory is forbidden: '{p}'")
             except ValueError:
                 if str(p).lower().startswith(str(sd).lower()):
-                    raise ValueError(f"Writing into protected system directory is forbidden: '{p}'")
+                    raise ValueError(f"Writing into protected system directory is forbidden: '{p}'") from None
 
         if not p.parent.exists():
             raise ValueError(f"Parent directory does not exist for write: '{p.parent}'")
@@ -916,7 +916,10 @@ def _get_superghidra_path() -> str:
     env_path = os.environ.get("SUPERGHIDRA_PATH")
     if env_path and os.path.exists(env_path):
         return env_path
-    repo_sibling = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "SuperGhidra")
+    repo_sibling = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "SuperGhidra",
+    )
     if os.path.exists(repo_sibling):
         return repo_sibling
     fallback = r"E:\02_Projects\SuperGhidra"
@@ -945,7 +948,10 @@ def _ensure_superghidra_imported():
         _add_superghidra_dir(env_path)
         return
 
-    repo_sibling = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "SuperGhidra")
+    repo_sibling = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "SuperGhidra",
+    )
     if os.path.exists(repo_sibling):
         _add_superghidra_dir(repo_sibling)
         return
@@ -1486,12 +1492,14 @@ def verify_smt_equivalence(
     arch: str = "arm64",
     ctx: Context | None = None,
 ) -> SmtVerificationResult:
-    """Formally proves bit-exact equivalence in Z3 between ARM64/x86_64 machine hex (or P-code JSON) and reconstructed C code.
+    """Formally proves bit-exact equivalence in Z3 between ARM64/x86_64 machine hex
+    (or P-code JSON) and reconstructed C code.
 
     Args:
         pcode_or_hex: Machine instruction hex bytes (e.g. '00 00 80 52 c0 03 5f d6') or serialized P-code JSON.
         c_code: Reconstructed decompiled C source snippet or statement.
-        target_reg: Name of target register to verify (default: 'x0'; supports x0..x30, w0..w30, d0..d31, s0..s31, rax..r15, eax..r15d, flag_n..flag_v).
+        target_reg: Name of target register to verify
+            (default: 'x0'; supports x0..x30, w0..w30, d0..d31, s0..s31, rax..r15, eax..r15d, flag_n..flag_v).
         param_map: Optional variable-to-register parameter mapping: {'player': 'x0', 'damage': 'w2'}.
         base_pc: Virtual address base for instruction lifting (default: 0x1000).
         arch: Target architecture for machine hex lifting ('arm64' or 'x86_64', default: 'arm64').
@@ -1804,7 +1812,7 @@ def cross_reference_apk_jni(
     )
 
 
-def _parse_functions_for_diff(input_str: str) -> list[Any]:
+def _parse_functions_for_diff(input_str: str) -> tuple[list[Any], bool]:
     """Parses JSON or raw binary files into a list of FunctionCFG objects for diffing."""
     _ensure_superghidra_imported()
     from superghidra.diff.binary_diff_engine import (
@@ -2223,7 +2231,10 @@ def neural_decompile_skin(
         semantics_method=semantics_method,
         readability_ran=readability_ran,
         counterexample=counterexample,
-        message=f"Neural decompile skin completed: {commit.function_name} ({len(commit.verified_struct_fields)} verified fields)",
+        message=(
+            f"Neural decompile skin completed: {commit.function_name} "
+            f"({len(commit.verified_struct_fields)} verified fields)"
+        ),
     )
 
 
@@ -2260,7 +2271,10 @@ def migrate_semantic_deltas(
 
     safe_output_delta = None
     if output_delta_log_path:
-        safe_output_delta = str(_resolve_safe_path(output_delta_log_path, must_exist=False, for_write=True, allowed_extensions={".jsonl", ".json", ".log", ".txt", ".py"}))
+        safe_output_delta = str(_resolve_safe_path(
+            output_delta_log_path, must_exist=False, for_write=True,
+            allowed_extensions={".jsonl", ".json", ".log", ".txt", ".py"}
+        ))
 
     engine = DeltaMigrationEngine(similarity_threshold=threshold)
     engine.run_diff_pairing(funcs_a, funcs_b)
@@ -2323,7 +2337,10 @@ def preindex_dwarf_pdb(
     )
 
     if db_output_path and db_output_path != ":memory:":
-        safe_db = str(_resolve_safe_path(db_output_path, must_exist=False, for_write=True, allowed_extensions={".sqlite", ".db", ".sqlite3", ".idx", ".bin"}))
+        safe_db = str(_resolve_safe_path(
+            db_output_path, must_exist=False, for_write=True,
+            allowed_extensions={".sqlite", ".db", ".sqlite3", ".idx", ".bin"}
+        ))
         db_target = safe_db
     else:
         db_target = ":memory:"
@@ -2377,7 +2394,10 @@ def preindex_dwarf_pdb(
         except Exception:
             pass
 
-    msg = f"Indexed {total_types} canonical types, {total_symbols} symbols, and {total_members} members into '{db_target}'."
+    msg = (
+        f"Indexed {total_types} canonical types, {total_symbols} symbols, "
+        f"and {total_members} members into '{db_target}'."
+    )
     return PreindexDwarfPdbResult(
         status="ok",
         input_path=binary_or_pdb_path,
@@ -2446,7 +2466,8 @@ def inspect_binary(
         total_exports=len(img.exports), total_imports=len(img.imports),
         total_function_starts=len(img.function_starts),
         message=(f"{img.format.upper()} {img.arch} {img.bits}-bit {'library' if img.is_library else 'executable'}: "
-                 f"{len(img.exports)} exports, {len(img.imports)} imports, {len(img.function_starts)} known functions."),
+                 f"{len(img.exports)} exports, {len(img.imports)} imports, "
+                 f"{len(img.function_starts)} known functions."),
     )
 
 
@@ -2479,13 +2500,13 @@ def recover_cpp_classes(
 
     path = _resolve_safe_path(binary_path, must_exist=True, for_write=False)
     report = msvc_class_recovery.recover_classes(str(path), rtti=include_rtti)
-    data = report.to_dict()
+    data: dict[str, Any] = cast(dict[str, Any], report.to_dict())
     needle = (name_filter or "").lower()
     limit = max(0, min(int(limit), 10000))
     mfc = [c for c in data["mfc_classes"]
            if (not needle or needle in c["name"].lower()) and (c["serializable"] or not serializable_only)]
     rtti = [c for c in data["rtti_classes"] if not needle or needle in c["name"].lower()]
-    counts = data["counts"]
+    counts: dict[str, Any] = cast(dict[str, Any], data["counts"])
     return RecoverCppClassesResult(
         path=str(path), arch=report.arch,
         total_mfc_classes=counts["mfc"], total_serializable=counts["mfc_serializable"],
@@ -2617,9 +2638,9 @@ def decode_carchive(
         cal = {"variable": cal.get("variable"), "value": cal.get("value"),
                "max_known_threshold": cal.get("max_known_threshold"), "warning": cal.get("warning"),
                "trials": sorted(cal.get("trials", []), key=lambda t: -t["decoded_bytes"])[:10]}
-    res = mfc_archive.decode_stream(data, layouts, start=int(offset), env=use_env)
+    res: dict[str, Any] = cast(dict[str, Any], mfc_archive.decode_stream(data, layouts, start=int(offset), env=use_env))
     limit = max(0, min(int(limit), 20000))
-    s = res["stats"]
+    s: dict[str, Any] = cast(dict[str, Any], res["stats"])
     return DecodeCArchiveResult(
         stream_path=str(sp), length=res["length"], layout_binaries=[str(b) for b in bins], layouts=len(layouts),
         env=use_env, calibration=cal, stats=s, map_reliable=res["map_reliable"], classes=res["classes"],
@@ -2686,7 +2707,11 @@ def benchmark_storage_compression(
         lz4_throughput_mb_s=round(res_lz4.compress_mb_per_sec, 2),
         zstd_ratio=round(res_zstd.compression_ratio, 2),
         zstd_throughput_mb_s=round(res_zstd.compress_mb_per_sec, 2),
-        message=f"Storage benchmark complete: LZ4 {res_lz4.reduction_pct:.1f}% savings ({res_lz4.compress_mb_per_sec:.1f} MB/s); Zstd {res_zstd.reduction_pct:.1f}% savings ({res_zstd.compress_mb_per_sec:.1f} MB/s).",
+        message=(
+            f"Storage benchmark complete: LZ4 {res_lz4.reduction_pct:.1f}% savings "
+            f"({res_lz4.compress_mb_per_sec:.1f} MB/s); Zstd {res_zstd.reduction_pct:.1f}% savings "
+            f"({res_zstd.compress_mb_per_sec:.1f} MB/s)."
+        ),
     )
 
 
@@ -2731,7 +2756,11 @@ def compile_usercall_prototype(
 
     compiler = UsercallPrototypeCompiler(arch=arch)
     proto = compiler.parse_usercall(signature)
-    ret_storage = ", ".join(proto.return_binding.registers) if proto.return_binding and proto.return_binding.registers else "void"
+    ret_storage = (
+        ", ".join(proto.return_binding.registers)
+        if proto.return_binding and proto.return_binding.registers
+        else "void"
+    )
     param_storages = [
         f"{p.name}@{','.join(p.registers)}" if p.registers else f"{p.name}@stack[{p.stack_offset}]"
         for p in proto.parameters
@@ -2867,7 +2896,10 @@ def query_binary_dataflow(
         is_reachable=res.get("reachable", False),
         path_length=path_len,
         traversed_nodes=witness,
-        message=f"Dataflow reachability from {source_var} to {sink_var}: {res.get('reachable', False)} (hops: {path_len}).",
+        message=(
+            f"Dataflow reachability from {source_var} to {sink_var}: "
+            f"{res.get('reachable', False)} (hops: {path_len})."
+        ),
     )
 
 
@@ -2922,7 +2954,10 @@ def solve_global_type_lattice(
         resolved_variables=res.get("resolved_variables", {}),
         recovered_struct_layouts=res.get("recovered_struct_layouts", {}),
         iterations=res.get("iterations", 1),
-        message=f"Solved global type lattice: {len(res.get('resolved_variables', {}))} variables and {len(res.get('recovered_struct_layouts', {}))} struct layouts.",
+        message=(
+            f"Solved global type lattice: {len(res.get('resolved_variables', {}))} variables "
+            f"and {len(res.get('recovered_struct_layouts', {}))} struct layouts."
+        ),
     )
 
 

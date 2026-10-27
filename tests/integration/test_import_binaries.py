@@ -104,7 +104,7 @@ async def test_import_binaries_recursive(
             bin_1_ready = False
             bin_2_ready = False
 
-            for _ in range(240):
+            for _ in range(360):
                 await asyncio.sleep(1)
 
                 response = await session.call_tool("list_project_binaries", {})

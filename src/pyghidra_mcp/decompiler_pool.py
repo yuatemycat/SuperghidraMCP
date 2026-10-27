@@ -23,7 +23,7 @@ class DecompilerPool:
 
     def __init__(
         self,
-        factory: Callable[[], "DecompInterface"],
+        factory: Callable[[], DecompInterface],
         *,
         size: int = 1,
         program: Any | None = None,
@@ -142,7 +142,7 @@ class DecompilerPool:
             "is_hibernating": True,
         }
 
-    def _rearm_decompiler(self, decompiler: "DecompInterface") -> None:
+    def _rearm_decompiler(self, decompiler: DecompInterface) -> None:
         prog = None
         if hasattr(decompiler, "getProgram"):
             try:
@@ -229,7 +229,7 @@ class DecompilerPool:
             "message": f"Decompiler pool resource mode updated to '{self.resource_mode}'",
         }
 
-    def _create(self) -> "DecompInterface":
+    def _create(self) -> DecompInterface:
         decompiler = self._factory()
         with self._created_lock:
             if not self._closed:
@@ -244,7 +244,7 @@ class DecompilerPool:
         self._dispose_one(decompiler)
         raise RuntimeError("Decompiler pool is closed")
 
-    def _ensure_available(self) -> "DecompInterface":
+    def _ensure_available(self) -> DecompInterface:
         try:
             return self._queue.get_nowait()
         except queue.Empty:
@@ -324,7 +324,7 @@ class DecompilerPool:
             self._dispose_one(decompiler)
 
     @staticmethod
-    def _dispose_one(decompiler: "DecompInterface") -> None:
+    def _dispose_one(decompiler: DecompInterface) -> None:
         for method_name in ("dispose", "closeProgram"):
             method = getattr(decompiler, method_name, None)
             if method is not None:

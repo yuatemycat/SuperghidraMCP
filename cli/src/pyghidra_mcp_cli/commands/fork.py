@@ -79,4 +79,9 @@ def discard(ctx: click.Context, fork_id: str) -> None:
 @click.pass_context
 def prune(ctx: click.Context, dry_run: bool, max_age_hours: float, include_unmerged: bool) -> None:
     """Garbage collect dead and merged forks to reclaim disk storage."""
-    _run(ctx, lambda client: client.prune_forks(dry_run=dry_run, max_age_hours=max_age_hours, include_unmerged=include_unmerged))
+    _run(
+        ctx,
+        lambda client: client.prune_forks(
+            dry_run=dry_run, max_age_hours=max_age_hours, include_unmerged=include_unmerged
+        ),
+    )

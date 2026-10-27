@@ -45,6 +45,7 @@ def ghidra_env():
     - Else skip tests that require a Ghidra installation.
     """
     env = os.environ.copy()
+    env.setdefault("_JAVA_OPTIONS", "-Xmx1024m")
     ghidra_dir = env.get("GHIDRA_INSTALL_DIR")
     if ghidra_dir and os.path.isdir(ghidra_dir):
         return env

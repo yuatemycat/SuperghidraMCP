@@ -19,7 +19,7 @@ def _shared_project_params(project_root, ghidra_env, *extra):
             "shared",
             *extra,
         ],
-        env=ghidra_env,
+        env={**ghidra_env, "_JAVA_OPTIONS": "-Xmx1024m"},
     )
 
 

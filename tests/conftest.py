@@ -14,6 +14,8 @@ except ImportError:
         if _env_sg not in sys.path:
             sys.path.insert(0, _env_sg)
     else:
-        _SUPERGHIDRA = r"E:\02_Projects\SuperGhidra"
+        _SUPERGHIDRA = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "SuperGhidra"))
+        if not os.path.exists(_SUPERGHIDRA):
+            _SUPERGHIDRA = r"E:\02_Projects\SuperGhidra"
         if os.path.exists(_SUPERGHIDRA) and _SUPERGHIDRA not in sys.path:
             sys.path.insert(0, _SUPERGHIDRA)
