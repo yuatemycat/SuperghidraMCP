@@ -590,9 +590,9 @@ def run_headless_server(
 @optgroup.option(
     "--project-path",
     type=click.Path(path_type=Path),
-    default=Path("pyghidra_mcp_projects"),
+    default=Path("superghidra_mcp_projects"),
     show_default=True,
-    help="Directory path to create new pyghidra-mcp project or an existing Ghidra .gpr file.",
+    help="Directory path to create new superghidra-mcp project or an existing Ghidra .gpr file.",
 )
 @optgroup.option(
     "--project-name",

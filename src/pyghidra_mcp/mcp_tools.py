@@ -916,15 +916,15 @@ def prune_forks(
 # ---------------------------------------------------------------------------------
 
 
-def _get_superghidra_path() -> str:
+def _get_superghidra_path() -> str | None:
     env_path = os.environ.get("SUPERGHIDRA_PATH")
     if env_path and os.path.exists(env_path):
         return env_path
-    repo_sibling = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-        "SuperGhidra",
-    )
-    return repo_sibling
+    # Sibling repository adjacent to SuperghidraMCP root
+    repo_sibling = Path(__file__).resolve().parents[3] / "SuperGhidra"
+    if repo_sibling.exists():
+        return str(repo_sibling)
+    return None
 
 
 def _add_superghidra_dir(p: str):
@@ -936,17 +936,16 @@ def _add_superghidra_dir(p: str):
 
 
 def _ensure_superghidra_imported():
-    # Always prioritize local SuperGhidra repository over any installed package
-    env_path = os.environ.get("SUPERGHIDRA_PATH")
-    if env_path and os.path.exists(env_path):
-        _add_superghidra_dir(env_path)
+    # Respect installed package first; do not silently override with SUPERGHIDRA_PATH
+    try:
+        import superghidra  # noqa: F401
+        return
+    except ImportError:
+        pass
 
-    repo_sibling = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-        "SuperGhidra",
-    )
-    if os.path.exists(repo_sibling):
-        _add_superghidra_dir(repo_sibling)
+    sg_path = _get_superghidra_path()
+    if sg_path:
+        _add_superghidra_dir(sg_path)
 
 
 def _to_ghidra_addr(program: Any, offset: int) -> Any:

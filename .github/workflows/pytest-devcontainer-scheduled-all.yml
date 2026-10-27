@@ -1,4 +1,4 @@
-name: Pytest PyPI CLI Package Devcontainer Across Versions
+name: Pytest Scheduled Devcontainer Across Versions
 
 on:
   release:
@@ -6,11 +6,6 @@ on:
   schedule:
     - cron: '30 5,15 * * *'
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Published version to test (for example, v0.2.6); blank tests latest'
-        required: false
-        type: string
 
 jobs:
   test-linux:
@@ -27,6 +22,7 @@ jobs:
           "12.1.2ghidra3.13python-trixie-slim",
           "11.3.2ghidra3.12python-bookworm",
           "11.4.1ghidra3.11python-bookworm",
+          "11.3ghidra3.10python-bookworm",
           # "11.3ghidra3.9python-bookworm",
           "12.0ghidra3.13python-bookworm",
         ]
@@ -38,7 +34,7 @@ jobs:
       run: |
         cp .github/workflows/devcontainer.json .devcontainer/devcontainer.json
 
-    - name: Test CLI with pytest on devcontainer
+    - name: Test with pytest on devcontainer
       env:
         DC_IMAGE_TAG: ${{ matrix.image }}
       uses: devcontainers/ci@v0.3
@@ -51,38 +47,34 @@ jobs:
           env
           ls /usr/local/include/
           pip install --upgrade pip
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          export PATH="$HOME/.local/bin:/root/.cargo/bin:$PATH"
-          
-          # Create and activate an isolated virtual environment
-          uv venv
-          . .venv/bin/activate
-          
-          # If Ghidra major version is 11, pin pyghidra==2.2.1 first
+          python -m venv .venv
+          source .venv/bin/activate
+
+          # Install package in editable mode with dev extras
+          pip install -e .[dev]
+
+          # If Ghidra major version is 11, pin pyghidra==2.2.1
           if [[ "$GHIDRA_VERSION" == 11.* ]]; then
             echo "Detected Ghidra $GHIDRA_VERSION, pinning pyghidra==2.2.1..."
-            uv pip install "pyghidra==2.2.1"
+            pip install "pyghidra==2.2.1"
           fi
 
-          # Point to local repository source
-          uv pip install -e .
-          uv pip install -e ./cli[dev]
+          # Run tests
+          python -m pytest tests/unit/ --doctest-modules --junitxml=junit/unit-test-results-${{ matrix.image }}.xml
+          python -m pytest tests/integration/ --doctest-modules --junitxml=junit/integration-test-results-${{ matrix.image }}.xml
 
-          if [[ "$GHIDRA_VERSION" == 11.* ]]; then
-            echo "Detected Ghidra $GHIDRA_VERSION, pinning pyghidra==2.2.1..."
-            uv pip install "pyghidra==2.2.1"
-          fi
-          
-          # Change to CLI directory where the tests are located
-          cd cli
-          
-          # Use the active environment; uv run would sync the local CLI project.
-          python -m pytest tests/ -v --doctest-modules --junitxml=junit/pypi-test-results-${{ matrix.image }}.xml
-
-    - name: Upload CLI test results
+    - name: Upload unit test results
       if: ${{ always() }}
       uses: actions/upload-artifact@v4
       with:
-        name: cli-pypi-test-results-${{ matrix.image }}
-        path: junit/pypi-test-results-${{ matrix.image }}.xml
+        name: unit-test-results-${{ matrix.image }}
+        path: junit/unit-test-results-${{ matrix.image }}.xml
+        retention-days: 7
+
+    - name: Upload integration test results
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: integration-test-results-${{ matrix.image }}
+        path: junit/integration-test-results-${{ matrix.image }}.xml
         retention-days: 7

@@ -39,4 +39,4 @@ def test_shared_fixtures_use_explicit_project_path(request, fixture_name):
     project_path = Path(server_params.args[project_path_index])
 
     assert project_path.is_absolute()
-    assert project_path.name != "pyghidra_mcp_projects"
+    assert project_path.name not in ("pyghidra_mcp_projects", "superghidra_mcp_projects")

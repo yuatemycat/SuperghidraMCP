@@ -9,9 +9,9 @@ replays that journal with ``merge_fork``.
 
 On-disk layout, inside the main project's pyghidra-mcp directory::
 
-    <name>-pyghidra-mcp/forks/<fork_id>/
+    <name>-superghidra-mcp/forks/<fork_id>/
         <name>.gpr, <name>.rep/     cloned Ghidra project (same program paths)
-        <name>-pyghidra-mcp/        the fork's own Chroma index and GZFs
+        <name>-superghidra-mcp/     the fork's own Chroma index and GZFs
         fork.json                   written by the fork process only
         journal.jsonl               append-only edit log, written by the fork only
         merge_state.json            written by the merging (primary) process only
@@ -195,7 +195,7 @@ class ForkSession:
             project_directory=self.fork_dir,
             project_name=self.project_name,
             gpr_path=self.fork_dir / f"{self.project_name}.gpr",
-            pyghidra_mcp_dir=self.fork_dir / f"{self.project_name}-pyghidra-mcp",
+            pyghidra_mcp_dir=self.fork_dir / f"{self.project_name}-superghidra-mcp",
             was_gpr_path=False,
         )
 
@@ -280,7 +280,7 @@ def create_fork(
         shutil.rmtree(fork_dir, ignore_errors=True)
         raise
 
-    state_dir = fork_dir / f"{name}-pyghidra-mcp"
+    state_dir = fork_dir / f"{name}-superghidra-mcp"
     state_dir.mkdir()
     source_index = parent.pyghidra_mcp_dir / "chromadb"
     if seed_index and source_index.is_dir():

@@ -73,7 +73,7 @@ async def test_open_specific_project_from_multi_project_directory(
 
             # Verify that the correct project was opened
             # The project should be "afd-11" from the project name
-            afd_artifact_dir = multi_project_directory / "afd-11" / "afd-11-pyghidra-mcp"
+            afd_artifact_dir = multi_project_directory / "afd-11" / "afd-11-superghidra-mcp"
             assert afd_artifact_dir.exists(), "Artifact directory for afd-11 should be created"
             assert (afd_artifact_dir / "chromadb").exists(), "ChromaDB should exist for afd-11"
             assert (afd_artifact_dir / "gzfs").exists(), "GZFS should exist for afd-11"
@@ -99,7 +99,7 @@ async def test_open_different_project_from_same_directory(
 
             # Verify that the correct project was opened
             # The project should be "macos-test" from the project name
-            macos_artifact_dir = multi_project_directory / "macos-test" / "macos-test-pyghidra-mcp"
+            macos_artifact_dir = multi_project_directory / "macos-test" / "macos-test-superghidra-mcp"
             assert (
                 macos_artifact_dir.exists()
             ), "Artifact directory for macos-test should be created"
@@ -120,7 +120,7 @@ async def test_projects_are_isolated(
             await session.initialize()
 
             # Verify afd-11 project directory was created
-            afd_project_dir = multi_project_directory / "afd-11" / "afd-11-pyghidra-mcp"
+            afd_project_dir = multi_project_directory / "afd-11" / "afd-11-superghidra-mcp"
             assert afd_project_dir.exists(), "afd-11 project directory should exist"
 
     # Start second project
@@ -129,12 +129,12 @@ async def test_projects_are_isolated(
             await session.initialize()
 
             # Verify macos-test project directory was created
-            macos_project_dir = multi_project_directory / "macos-test" / "macos-test-pyghidra-mcp"
+            macos_project_dir = multi_project_directory / "macos-test" / "macos-test-superghidra-mcp"
             assert macos_project_dir.exists(), "macos-test project directory should exist"
 
     # Verify both projects are separate
-    afd_project_dir = multi_project_directory / "afd-11" / "afd-11-pyghidra-mcp"
-    macos_project_dir = multi_project_directory / "macos-test" / "macos-test-pyghidra-mcp"
+    afd_project_dir = multi_project_directory / "afd-11" / "afd-11-superghidra-mcp"
+    macos_project_dir = multi_project_directory / "macos-test" / "macos-test-superghidra-mcp"
 
     assert afd_project_dir.exists() and macos_project_dir.exists()
     assert afd_project_dir != macos_project_dir, "Projects should be in separate directories"
@@ -195,11 +195,11 @@ async def test_shared_base_directory_projects(ghidra_env):
                 await session.initialize()
 
         # Verify both projects have separate artifact directories
-        proj1_artifacts = base_dir / "proj1" / "proj1-pyghidra-mcp"
-        proj2_artifacts = base_dir / "proj2" / "proj2-pyghidra-mcp"
+        proj1_artifacts = base_dir / "proj1" / "proj1-superghidra-mcp"
+        proj2_artifacts = base_dir / "proj2" / "proj2-superghidra-mcp"
 
-        assert proj1_artifacts.exists(), "proj1-pyghidra-mcp should be created"
-        assert proj2_artifacts.exists(), "proj2-pyghidra-mcp should be created"
+        assert proj1_artifacts.exists(), "proj1-superghidra-mcp should be created"
+        assert proj2_artifacts.exists(), "proj2-superghidra-mcp should be created"
         assert (
             proj1_artifacts != proj2_artifacts
         ), "Projects should have separate artifact directories"
@@ -210,10 +210,10 @@ async def test_shared_base_directory_projects(ghidra_env):
         assert (proj2_artifacts / "chromadb").exists(), "proj2 chromadb should exist"
         assert (proj2_artifacts / "gzfs").exists(), "proj2 gzfs should exist"
 
-        # Verify consistent naming (always append -pyghidra-mcp)
+        # Verify consistent naming (always append -superghidra-mcp)
         assert (
-            proj1_artifacts.name == "proj1-pyghidra-mcp"
+            proj1_artifacts.name == "proj1-superghidra-mcp"
         ), "proj1 artifacts should have project name"
         assert (
-            proj2_artifacts.name == "proj2-pyghidra-mcp"
+            proj2_artifacts.name == "proj2-superghidra-mcp"
         ), "proj2 artifacts should have project name"

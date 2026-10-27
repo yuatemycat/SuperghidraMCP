@@ -225,10 +225,18 @@ flowchart TD
 
 ## Getting started
 
-Start a persistent Streamable HTTP server using the [Python package](https://pypi.org/p/superghidra-mcp) and [`uv`](https://docs.astral.sh/uv/guides/tools/):
+Install `superghidra-mcp` from repository source:
 
 ```bash
-uvx superghidra-mcp \
+git clone https://github.com/yuatemycat/SuperghidraMCP.git
+cd SuperghidraMCP
+pip install -e .
+```
+
+Start a persistent Streamable HTTP server:
+
+```bash
+superghidra-mcp \
   --transport streamable-http \
   --project-path /absolute/path/to/ghidra-projects \
   /absolute/path/to/binary
@@ -239,7 +247,7 @@ The server is then available at `http://127.0.0.1:8000/mcp`. Leave it running an
 To launch and control a live Ghidra GUI from MCP, use `--gui` with `streamable-http`:
 
 ```bash
-uvx superghidra-mcp \
+superghidra-mcp \
   --gui \
   --transport streamable-http \
   --host 127.0.0.1 \
@@ -254,7 +262,7 @@ uvx superghidra-mcp \
 Or, run as a [Docker container](https://ghcr.io/yuatemycat/superghidra-mcp):
 
 ```bash
-docker run --rm -p 8000:8000 ghcr.io/yuatemycat/superghidra-mcp
+docker run --rm -p 8000:8000 ghcr.io/yuatemycat/superghidra-mcp:latest
 ```
 
 ## Optimized for Agents
@@ -274,16 +282,18 @@ For a more interactive command-line experience, you can use the separate **super
 
 ### Installation
 
-Install the CLI client using [`uv`](https://docs.astral.sh/uv/) (recommended):
+Install the CLI client from the repository source:
 
 ```bash
-uvx superghidra-mcp-cli
+cd cli
+pip install -e .
 ```
 
-Or install with pip:
+Or using `uv`:
 
 ```bash
-pip install superghidra-mcp-cli
+cd cli
+uv pip install -e .
 ```
 
 ### Quick Start with CLI
@@ -618,10 +628,16 @@ These tools are only available when `superghidra-mcp` is started with `--gui` an
 
 ## Usage
 
-This package is installed directly from repository source (it is not currently published on PyPI).python.org/en/latest/guides/installing-using-pip-and-virtual-environments/#install-a-package), [pipx](https://pipx.pypa.io/), [uv](https://docs.astral.sh/uv/), [poetry](https://python-poetry.org/), or any Python package manager.
+This package is installed directly from repository source (it is not currently published on PyPI):
+
+```bash
+git clone https://github.com/yuatemycat/SuperghidraMCP.git
+cd SuperghidraMCP
+pip install -e .
+```
 
 ```text
-$ uvx superghidra-mcp --help
+$ superghidra-mcp --help
 Usage: superghidra-mcp [OPTIONS] [INPUT_PATHS]...
 
   PyGhidra Command-Line MCP server
@@ -680,7 +696,7 @@ cp /path/to/your/binaries/* ./binaries/
 # Run the Docker container with volume mapping
 docker run -i --rm \
   -v "$(pwd)/binaries:/binaries" \
-  ghcr.io/yuatemycat/superghidra-mcp \
+  ghcr.io/yuatemycat/superghidra-mcp:latest \
   /binaries/*
 ```
 
@@ -710,7 +726,7 @@ superghidra-mcp \
 #### Docker
 
 ```
-docker run -p 8000:8000 ghcr.io/yuatemycat/superghidra-mcp
+docker run -p 8000:8000 ghcr.io/yuatemycat/superghidra-mcp:latest
 ```
 
 ### Claude Code
@@ -762,7 +778,7 @@ Because the server communicates on standard input and output, it will appear to 
 #### Docker
 
 ```bash
-docker run -i --rm ghcr.io/yuatemycat/superghidra-mcp -t stdio
+docker run -i --rm ghcr.io/yuatemycat/superghidra-mcp:latest -t stdio
 ```
 
 The Docker image starts the Streamable HTTP server by default, so include `-t stdio` after the image name and use `-i` for [interactive](https://docs.docker.com/reference/cli/docker/container/run/#interactive) stdio mode.
@@ -782,7 +798,7 @@ uvx mcpo -- superghidra-mcp /bin/ls
 #### With Docker
 
 ```bash
-uvx mcpo -- docker run -i --rm ghcr.io/yuatemycat/superghidra-mcp /bin/ls
+uvx mcpo -- docker run -i --rm ghcr.io/yuatemycat/superghidra-mcp:latest /bin/ls
 ```
 
 ### Server-sent events (SSE)
@@ -805,7 +821,7 @@ By default, the Python package will run in `stdio` mode, so you will have to inc
 #### Docker
 
 ```
-docker run -p 8000:8000 ghcr.io/yuatemycat/superghidra-mcp -t sse
+docker run -p 8000:8000 ghcr.io/yuatemycat/superghidra-mcp:latest -t sse
 ```
 
 ## Inspiration
