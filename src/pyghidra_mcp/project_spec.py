@@ -25,6 +25,13 @@ class ProjectSpec:
         """Normalize CLI project options without depending on click."""
         project_path = Path(project_path)
 
+        def _resolve_state_dir(base: Path, name: str) -> Path:
+            legacy = base / f"{name}-pyghidra-mcp"
+            canonical = base / f"{name}-superghidra-mcp"
+            if legacy.exists() and not canonical.exists():
+                return legacy
+            return canonical
+
         if project_path.suffix.lower() == ".gpr":
             if project_name != default_project_name:
                 raise ValueError("Cannot use --project-name when specifying a .gpr file")
@@ -35,7 +42,7 @@ class ProjectSpec:
                 project_directory=project_directory,
                 project_name=resolved_project_name,
                 gpr_path=project_path,
-                pyghidra_mcp_dir=project_directory / f"{resolved_project_name}-superghidra-mcp",
+                pyghidra_mcp_dir=_resolve_state_dir(project_directory, resolved_project_name),
                 was_gpr_path=True,
             )
 
@@ -43,6 +50,6 @@ class ProjectSpec:
             project_directory=project_path,
             project_name=project_name,
             gpr_path=project_path / f"{project_name}.gpr",
-            pyghidra_mcp_dir=project_path / f"{project_name}-superghidra-mcp",
+            pyghidra_mcp_dir=_resolve_state_dir(project_path, project_name),
             was_gpr_path=False,
         )

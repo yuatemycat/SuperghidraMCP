@@ -191,11 +191,14 @@ class ForkSession:
 
     @property
     def project_spec(self) -> ProjectSpec:
+        legacy = self.fork_dir / f"{self.project_name}-pyghidra-mcp"
+        canonical = self.fork_dir / f"{self.project_name}-superghidra-mcp"
+        state_dir = legacy if legacy.exists() and not canonical.exists() else canonical
         return ProjectSpec(
             project_directory=self.fork_dir,
             project_name=self.project_name,
             gpr_path=self.fork_dir / f"{self.project_name}.gpr",
-            pyghidra_mcp_dir=self.fork_dir / f"{self.project_name}-superghidra-mcp",
+            pyghidra_mcp_dir=state_dir,
             was_gpr_path=False,
         )
 
@@ -280,7 +283,12 @@ def create_fork(
         shutil.rmtree(fork_dir, ignore_errors=True)
         raise
 
-    state_dir = fork_dir / f"{name}-superghidra-mcp"
+    legacy_parent = (
+        parent.pyghidra_mcp_dir.name.endswith("-pyghidra-mcp")
+        or parent.pyghidra_mcp_dir.name == "pyghidra-mcp"
+    )
+    suffix = "-pyghidra-mcp" if legacy_parent else "-superghidra-mcp"
+    state_dir = fork_dir / f"{name}{suffix}"
     state_dir.mkdir()
     source_index = parent.pyghidra_mcp_dir / "chromadb"
     if seed_index and source_index.is_dir():

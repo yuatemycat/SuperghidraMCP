@@ -747,6 +747,17 @@ def main(
     For streamable-http and sse, it will start an HTTP server on the specified port (default 8000).
 
     """
+    # Backward compatibility fallback: if project_path is the default 'superghidra_mcp_projects'
+    # and that directory does not exist, but legacy 'pyghidra_mcp_projects' exists,
+    # fallback to the legacy directory so existing projects remain discoverable.
+    if (
+        project_path == Path("superghidra_mcp_projects")
+        and not project_path.exists()
+        and Path("pyghidra_mcp_projects").exists()
+    ):
+        logger.info("Found existing legacy project directory 'pyghidra_mcp_projects'; using it.")
+        project_path = Path("pyghidra_mcp_projects")
+
     try:
         project_spec = ProjectSpec.from_cli(
             project_path,

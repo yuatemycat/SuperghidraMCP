@@ -151,8 +151,13 @@ class PyGhidraContext(IndexingMixin):
         if pyghidra_mcp_dir:
             self.pyghidra_mcp_dir = pyghidra_mcp_dir
         else:
-            # Default: create pyghidra-mcp directory alongside project
-            self.pyghidra_mcp_dir = self.project_path / "pyghidra-mcp"
+            # Default: create superghidra-mcp directory alongside project,
+            # falling back to legacy pyghidra-mcp if existing.
+            legacy_dir = self.project_path / "pyghidra-mcp"
+            canonical_dir = self.project_path / "superghidra-mcp"
+            self.pyghidra_mcp_dir = (
+                legacy_dir if legacy_dir.exists() and not canonical_dir.exists() else canonical_dir
+            )
 
         # From GhidraDiffEngine
         self.force_analysis = force_analysis
