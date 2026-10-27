@@ -16,16 +16,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import Context
-    from mcp.shared.exceptions import McpError as ToolError
+    from mcp.server.mcpserver import Context
+    from mcp.server.mcpserver.exceptions import ToolError
 else:
     try:
         from mcp.server.mcpserver import Context
         from mcp.server.mcpserver.exceptions import ToolError
     except ImportError:
         try:
-            from mcp.server.fastmcp import Context
-            from mcp.shared.exceptions import McpError as ToolError
+            from mcp.server.mcpserver import Context
+            from mcp.server.mcpserver.exceptions import ToolError
         except ImportError:
             Context = Any
             ToolError = Exception

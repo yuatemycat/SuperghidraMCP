@@ -10,16 +10,22 @@ import threading
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import click
 import pyghidra
 from click_option_group import optgroup
 
-try:
+if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
-except ImportError:
-    from mcp.server.fastmcp import FastMCP as MCPServer
+else:
+    try:
+        from mcp.server.mcpserver import MCPServer
+    except ImportError:
+        try:
+            from mcp.server.fastmcp import FastMCP as MCPServer
+        except ImportError:
+            MCPServer = Any
 
 from pyghidra_mcp import __version__, forks, mcp_tools
 from pyghidra_mcp.context import PyGhidraContext
