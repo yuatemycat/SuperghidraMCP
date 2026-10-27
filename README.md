@@ -13,7 +13,7 @@
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3776AB.svg)](https://www.python.org/)
 
-**SuperghidraMCP** is the official Model Context Protocol (MCP) server for [SuperGhidra](https://github.com/yuatemycat/SuperGhidra), built on [pyghidra-mcp](https://github.com/clearbluejar/pyghidra-mcp). It exposes **38 tools** directly to AI agents (Claude Code, Antigravity, Cursor, Codex), featuring private session forks, persistent lock-free daemon cache, GPU ARM64 sweeps, Z3 SMT equivalence verification, and MSVC/MFC C++ recovery.
+**SuperghidraMCP** is the official Model Context Protocol (MCP) server for [SuperGhidra](https://github.com/yuatemycat/SuperGhidra), built on [pyghidra-mcp](https://github.com/clearbluejar/pyghidra-mcp). It exposes **42 tools** directly to AI agents (Claude Code, Antigravity, Cursor, Codex), featuring private session forks, persistent lock-free daemon cache, GPU ARM64 sweeps, Z3 SMT equivalence verification, and MSVC/MFC C++ recovery.
 
 ---
 

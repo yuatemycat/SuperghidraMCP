@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Project Folder Rename & Legacy Fallback**: Default project directory aligned to `superghidra_mcp_projects/`. Added transparent backward-compatibility fallback that automatically discovers and opens existing projects in legacy `pyghidra_mcp_projects/` folders without requiring manual migration.
 - **Compatibility Preservation**: Retained the `pyghidra_mcp` Python package name, `pyghidra-mcp` console script entrypoint, and `pyghidra-mcp` Docker container entrypoint intentionally to preserve zero-friction backwards compatibility across existing MCP client registrations (Claude Desktop, Cursor, AGY CLI, and Hermes Agent).
-- **Core Dependency Alignment**: Updated `superghidra` core dependency requirement to `superghidra[smt,storage]>=0.5.0`.
+- **Core Dependency Compatibility**: Relaxed `superghidra` core dependency requirement to `superghidra[smt,storage]>=0.4.0` to permit installation prior to the public `superghidra` 0.5.0 PyPI release.
 
 ## [0.4.0] - 2026-10-26
 
