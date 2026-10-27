@@ -3,8 +3,6 @@ import tempfile
 import time
 from unittest.mock import MagicMock
 
-import pytest
-
 from pyghidra_mcp.decompiler_pool import DecompilerPool
 from pyghidra_mcp.l2_cache import L2SQLiteCache
 from pyghidra_mcp.models import DecompiledFunction

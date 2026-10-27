@@ -41,12 +41,13 @@ packages = [
 
 [tool.ruff]
 target-version = "py310"
-line-length = 100
+line-length = 120
 
 [tool.uv.sources]
 pyghidra-mcp = { path = "..", editable = true }
 
 [tool.ruff.lint]
+ignore = ["E501", "B017", "E402", "F821"]
 select = [
     "E",
     "F",

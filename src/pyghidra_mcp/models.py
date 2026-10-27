@@ -4,7 +4,6 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
-
 class DecompiledFunction(BaseModel):
     name: str
     code: str
@@ -308,6 +307,19 @@ class ForkMergeResult(BaseModel):
     counts: dict[str, int]
     entries: list[ForkMergeEntry]
     pending_ops: int
+
+class ForkPrunedItem(BaseModel):
+    fork_id: str
+    reason: str
+    reclaimed_bytes: int
+    path: str
+
+
+class ForkPruneResult(BaseModel):
+    scanned: int
+    pruned: list[ForkPrunedItem]
+    bytes_reclaimed: int
+    dry_run: bool
 
 
 class RvaTranslateResult(BaseModel):

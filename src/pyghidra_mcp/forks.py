@@ -108,12 +108,25 @@ def pid_alive(pid: int | None) -> bool:
 
         handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
         if not handle:
-            return ctypes.get_last_error() == error_access_denied
+            # On Windows, error_access_denied occurs for SYSTEM/privileged services (e.g. svchost)
+            # whose PIDs were recycled after a user-level Python process terminated.
+            # PyGhidra processes run as the current user, so query limited info never denies access.
+            return False
         try:
             exit_code = wintypes.DWORD()
             if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
-                return True
-            return exit_code.value == still_active
+                return False
+            if exit_code.value != still_active:
+                return False
+            # Verify the process is actually python, java, or a pyghidra/superghidra runner
+            buf = ctypes.create_unicode_buffer(1024)
+            size = wintypes.DWORD(len(buf))
+            if kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
+                exe_name = Path(buf.value).name.lower()
+                allowed_prefixes = ("python", "pyghidra", "superghidra", "java", "javaw", "pytest")
+                if not any(exe_name.startswith(p) for p in allowed_prefixes):
+                    return False
+            return True
         finally:
             kernel32.CloseHandle(handle)
     try:

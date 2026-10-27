@@ -92,8 +92,8 @@ class GhidraTools:
         self.decompiler_pool = program_info.decompiler_pool
         if l2_cache is not None:
             self.l2_cache = l2_cache
-        elif hasattr(program_info, "l2_cache") and getattr(program_info, "l2_cache") is not None:
-            self.l2_cache = getattr(program_info, "l2_cache")
+        elif hasattr(program_info, "l2_cache") and program_info.l2_cache is not None:
+            self.l2_cache = program_info.l2_cache
         else:
             from pyghidra_mcp.l2_cache import get_l2_cache
 
@@ -460,8 +460,8 @@ class GhidraTools:
                     try:
                         from superghidra.core.resource_governor import (
                             DecompilerComplexityGovernor,
-                            get_default_mode_policy,
                             ResourceMode,
+                            get_default_mode_policy,
                         )
                     except ImportError:
                         import sys
@@ -479,8 +479,8 @@ class GhidraTools:
                                     sys.path.insert(0, fallback_sg)
                         from superghidra.core.resource_governor import (
                             DecompilerComplexityGovernor,
-                            get_default_mode_policy,
                             ResourceMode,
+                            get_default_mode_policy,
                         )
 
                     mode_enum = (
@@ -1517,8 +1517,8 @@ class GhidraTools:
         self,
         old_binary_path: str,
         new_binary_path: str,
-        struct_name: typing.Optional[str] = None,
-        original_header: typing.Optional[str] = None,
+        struct_name: str | None = None,
+        original_header: str | None = None,
     ) -> dict[str, typing.Any]:
         """Discovers struct field displacement shifts between two binary versions."""
         return migrate_struct_shifts(
@@ -1532,8 +1532,8 @@ class GhidraTools:
 def migrate_struct_shifts(
     old_binary_path: str,
     new_binary_path: str,
-    struct_name: typing.Optional[str] = None,
-    original_header: typing.Optional[str] = None,
+    struct_name: str | None = None,
+    original_header: str | None = None,
 ) -> dict[str, typing.Any]:
     """Analyzes two binary versions to discover struct displacement shifts and generate C++ header patches."""
     try:

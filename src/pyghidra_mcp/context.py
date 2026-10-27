@@ -1,8 +1,10 @@
 import concurrent.futures
+import contextlib
 import hashlib
 import json
 import logging
 import multiprocessing
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -756,7 +758,7 @@ class PyGhidraContext(IndexingMixin):
 
         logger.info("All programs analyzed.")
 
-    def analyze_program(  # noqa C901
+    def analyze_program(
         self,
         df_or_prog: Union["DomainFile", "Program"],
         require_symbols: bool = True,
@@ -854,7 +856,8 @@ class PyGhidraContext(IndexingMixin):
                     )
                 else:
                     logger.info(f"Setting up symbol server at {self.symbols_path}")
-                    setup_symbol_server(self.symbols_path)
+                    with contextlib.redirect_stdout(sys.stderr):
+                        setup_symbol_server(self.symbols_path)
                     set_remote_pdbs(program, True)
 
                     # Verify PDB loaded
@@ -895,7 +898,7 @@ class PyGhidraContext(IndexingMixin):
         program_info.metadata = self.get_metadata(program)
         return df_or_prog
 
-    def set_analysis_option(  # noqa: C901
+    def set_analysis_option(
         self,
         prog: "Program",
         option_name: str,

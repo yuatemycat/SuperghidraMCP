@@ -11,7 +11,6 @@ import pytest
 
 from pyghidra_mcp import mcp_tools, tools
 from pyghidra_mcp.models import (
-    FieldMigrationItem,
     MigrateStructShiftsResult,
     StructInsertionItem,
 )

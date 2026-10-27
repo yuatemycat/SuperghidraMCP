@@ -13,11 +13,8 @@ Regression test suite for verified bugs 1-7 in pyghidra_mcp:
 
 from __future__ import annotations
 
-import json
 import os
-import struct
 import tempfile
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -165,7 +162,7 @@ def test_6_diff_binaries_heuristic_labeling():
         assert "[heuristic]" in res.message or any(m.match_type == "heuristic" for m in res.matches)
     finally:
         if orig_fn is not None:
-            setattr(binary_diff_engine, "extract_cfgs_from_binary", orig_fn)
+            binary_diff_engine.extract_cfgs_from_binary = orig_fn
         for p in (p1, p2):
             if os.path.exists(p):
                 os.remove(p)

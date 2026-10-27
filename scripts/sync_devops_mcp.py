@@ -6,7 +6,6 @@ import json
 import shutil
 from pathlib import Path
 
-
 PROJECT_SRC = Path(r"E:\02_Projects\pyghidra-mcp\src\pyghidra_mcp")
 DEVOPS_PKG = Path(r"E:\03_Devops\PyGhidraMCP\Lib\site-packages\pyghidra_mcp")
 DEVOPS_PTH = Path(r"E:\03_Devops\PyGhidraMCP\Lib\site-packages\superghidra.pth")

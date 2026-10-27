@@ -27,7 +27,7 @@ import time
 import types
 from contextlib import contextmanager
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import pytest
 
@@ -42,7 +42,7 @@ if os.path.exists(_SUPERGHIDRA_DIR) and _SUPERGHIDRA_DIR not in sys.path:
     sys.path.insert(0, _SUPERGHIDRA_DIR)
 
 from pyghidra_mcp.decompiler_pool import DecompilerPool
-from pyghidra_mcp.l2_cache import L2SQLiteCache, get_l2_cache
+from pyghidra_mcp.l2_cache import L2SQLiteCache
 from pyghidra_mcp.mcp_tools import clear_cache, hibernate, rva_translate, set_governor_mode
 from pyghidra_mcp.models import (
     ClearCacheResult,
@@ -52,7 +52,6 @@ from pyghidra_mcp.models import (
     RvaTranslateResult,
 )
 from pyghidra_mcp.tools import GhidraTools
-
 
 # ==============================================================================
 # Fixtures

@@ -10,12 +10,10 @@ import json
 import logging
 import os
 import re
-import struct
 import sys
 import time
 from pathlib import Path
 from typing import Any, Literal, cast
-
 
 try:
     from mcp.server.mcpserver import Context
@@ -31,69 +29,69 @@ except ImportError:
 from pyghidra_mcp import forks
 from pyghidra_mcp.context_protocol import MCPContext
 from pyghidra_mcp.models import (
+    ApkJniCrossRefResult,
+    BinaryDiffResult,
+    BinaryMatchItem,
     BytesReadResult,
     CallGraphDirection,
     CallGraphDisplayType,
     CallGraphResult,
+    CFFDeflattenResult,
     ClearCacheResult,
     CodeSearchResults,
     CommentResponse,
     CrossReferenceInfos,
+    DataflowQueryResult,
+    DecodeCArchiveResult,
     DecompiledFunction,
     DisassembleResult,
+    EmulatorMemoryVerifyResult,
     ExportInfos,
+    FieldMigrationItem,
     ForkInfo,
     ForkList,
     ForkMergeResult,
+    ForkPruneResult,
     FunctionPrototypeResponse,
+    GotoResponse,
+    GovernorModeResult,
+    GovernorPolicy,
     GpuAdrpMatchItem,
     GpuAdrpScanResult,
     GpuFunctionSeedItem,
     GpuSeedFunctionsResult,
-    GovernorModeResult,
-    GovernorPolicy,
-    GotoResponse,
     GuiContextResponse,
     HibernateResult,
     ImportInfos,
     ImportRequestResult,
+    InspectBinaryResult,
+    JniMatchItem,
+    MigratedEventRecordItem,
+    MigrateSemanticDeltasResult,
+    MigrateStructShiftsResult,
+    NeuralDecompileSkinResult,
     OpenProgramInfo,
     OpenProgramInfos,
+    PreindexDwarfPdbResult,
     ProgramInfos,
+    RecoverCppClassesResult,
     RenameResponse,
     RvaTranslateResult,
     SaveRequestResult,
     SearchMode,
     SessionInfo,
+    SmtVerificationResult,
+    StorageCompressionResult,
     StringSearchResults,
+    StructInsertionItem,
     SymbolSearchResults,
+    SyntheticSymbolExportResult,
+    TraceSerializeResult,
+    TypeLatticeResult,
+    UsercallCompileResult,
     VariableRenameResponse,
     VariableTypeResponse,
-    FieldMigrationItem,
-    StructInsertionItem,
-    MigrateStructShiftsResult,
-    SmtVerificationResult,
-    SyntheticSymbolExportResult,
-    JniMatchItem,
-    ApkJniCrossRefResult,
-    BinaryMatchItem,
-    BinaryDiffResult,
-    EmulatorMemoryVerifyResult,
-    NeuralDecompileSkinResult,
-    MigratedEventRecordItem,
-    MigrateSemanticDeltasResult,
-    PreindexDwarfPdbResult,
-    InspectBinaryResult,
-    RecoverCppClassesResult,
-    TraceSerializeResult,
-    DecodeCArchiveResult,
-    StorageCompressionResult,
-    UsercallCompileResult,
-    CFFDeflattenResult,
-    DataflowQueryResult,
-    TypeLatticeResult,
 )
-
 from pyghidra_mcp.tools import GhidraTools
 
 logger = logging.getLogger(__name__)
@@ -248,10 +246,11 @@ def _resolve_safe_path(
                 raise ValueError(f"Path '{p}' is not within SUPERGHIDRA_ALLOWED_ROOTS: {allowed_roots_env}")
 
     if for_write:
-        if not p.parent.exists():
-            raise ValueError(f"Parent directory does not exist for write: '{p.parent}'")
-
         # Refuse system directories
+        raw_str = str(path).lower().replace("/", "\\")
+        if any(raw_str.startswith(prefix) for prefix in (r"c:\windows", r"c:\winnt", r"c:\program files")):
+            raise ValueError(f"Writing into protected system directory is forbidden: '{path}'")
+
         sys_dirs: list[Path] = []
         if os.name == "nt":
             for env_var in ("SystemRoot", "windir", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"):
@@ -269,6 +268,8 @@ def _resolve_safe_path(
                 Path("/usr").resolve(),
                 Path("/bin").resolve(),
                 Path("/sbin").resolve(),
+                Path("/System").resolve(),
+                Path("/Library").resolve(),
             ])
 
         for sd in sys_dirs:
@@ -276,8 +277,11 @@ def _resolve_safe_path(
                 p.relative_to(sd)
                 raise ValueError(f"Writing into protected system directory is forbidden: '{p}'")
             except ValueError:
-                if os.name == "nt" and str(p).lower().startswith(str(sd).lower()):
+                if str(p).lower().startswith(str(sd).lower()):
                     raise ValueError(f"Writing into protected system directory is forbidden: '{p}'")
+
+        if not p.parent.exists():
+            raise ValueError(f"Parent directory does not exist for write: '{p.parent}'")
 
         if p.exists():
             if p.is_dir():
@@ -882,6 +886,28 @@ def discard_fork(fork_id: str, ctx: Context) -> str:
     return f"Discarded fork {fork_id} ({info.get('pending_ops', 0)} unmerged edit(s) dropped)."
 
 
+@mcp_error_handler
+def prune_forks(
+    ctx: Context,
+    dry_run: bool = False,
+    max_age_hours: float = 168.0,
+    include_unmerged: bool = False,
+) -> ForkPruneResult:
+    """Garbage collect dead and merged forks to reclaim disk storage.
+
+    Prunes dead forks that are fully merged (pending_ops == 0).
+    If include_unmerged=True, also prunes dead abandoned forks older than max_age_hours.
+    """
+    pyghidra_context = _get_pyghidra_context(ctx)
+    result = forks.prune_forks(
+        _forks_dir(pyghidra_context),
+        dry_run=dry_run,
+        max_age_hours=max_age_hours,
+        include_unmerged=include_unmerged,
+    )
+    return ForkPruneResult(**result)
+
+
 # SuperGhidra Native MCP Tools
 # ---------------------------------------------------------------------------------
 
@@ -1214,8 +1240,8 @@ def gpu_seed_functions(
                 source_type = None
                 addr_set_cls = None
                 try:
-                    from ghidra.program.model.symbol import SourceType
                     from ghidra.program.model.address import AddressSet
+                    from ghidra.program.model.symbol import SourceType
                     source_type = SourceType.ANALYSIS
                     addr_set_cls = AddressSet
                 except Exception:
@@ -1293,6 +1319,7 @@ def set_governor_mode(
     try:
         _ensure_superghidra_imported()
         import dataclasses
+
         from superghidra.core.resource_governor import ResourceMode, get_default_mode_policy
 
         pol = get_default_mode_policy(ResourceMode(mode_str), logical_cores=os.cpu_count() or 8)
@@ -1470,15 +1497,15 @@ def verify_smt_equivalence(
         arch: Target architecture for machine hex lifting ('arm64' or 'x86_64', default: 'arm64').
     """
     _ensure_superghidra_imported()
-    from superghidra.lifters.smt_pcode_verifier import CCodeParser, CSymbolicEvaluator, SMTPcodeVerifier, SymbolicState
     from superghidra.lifters.pcode_lifter_bridge import (
-        ARM64PcodeLifter,
-        X86_64PcodeLifter,
         AddressSpace,
+        ARM64PcodeLifter,
         PcodeOp,
         PcodeOpcode,
         Varnode,
+        X86_64PcodeLifter,
     )
+    from superghidra.lifters.smt_pcode_verifier import CCodeParser, CSymbolicEvaluator, SMTPcodeVerifier, SymbolicState
 
     verifier = SMTPcodeVerifier()
     clean_input = pcode_or_hex.strip()
@@ -1615,7 +1642,7 @@ def export_synthetic_symbols(
     extra_symbols = None
     if symbols_json_path:
         safe_symbols = _resolve_safe_path(symbols_json_path, must_exist=True, for_write=False)
-        with open(safe_symbols, "r", encoding="utf-8") as f:
+        with open(safe_symbols, encoding="utf-8") as f:
             extra_symbols = json.load(f)
 
     requested_formats = formats or ["dwarf", "pdb", "sym", "map"]
@@ -1781,8 +1808,8 @@ def _parse_functions_for_diff(input_str: str) -> list[Any]:
     """Parses JSON or raw binary files into a list of FunctionCFG objects for diffing."""
     _ensure_superghidra_imported()
     from superghidra.diff.binary_diff_engine import (
-        FunctionCFG,
         BasicBlock,
+        FunctionCFG,
         InstructionInfo,
     )
 
@@ -1983,12 +2010,12 @@ def verify_emulator_memory(
     _ensure_superghidra_imported()
     from superghidra.integrations.emulator_memory_sidecar import (
         EmulatorFleetGuard,
+        FridaMemoryReader,
         MockMemoryReader,
         Win32ProcessMemoryReader,
-        FridaMemoryReader,
-        verify_vtable_pointer,
-        verify_struct_field,
         extract_dynamic_encryption_keys,
+        verify_struct_field,
+        verify_vtable_pointer,
     )
 
     # 1. Fleet safety check
@@ -2140,8 +2167,12 @@ def neural_decompile_skin(
         ledger_path: Optional path to evidence_ledger.json.
     """
     _ensure_superghidra_imported()
-    from superghidra.integrations.neural_decompiler_pipeline import NeuralDecompilerPipeline, SkeletonExtractor, LLMDecompilerClient
     from superghidra.core.evidence_ledger import ReconstructionObligationLedger
+    from superghidra.integrations.neural_decompiler_pipeline import (
+        LLMDecompilerClient,
+        NeuralDecompilerPipeline,
+        SkeletonExtractor,
+    )
 
     func_addr = int(function_address, 16) if function_address.startswith("0x") else int(function_address)
     base_addr = int(image_base, 16) if image_base.startswith("0x") else int(image_base)
@@ -2218,7 +2249,7 @@ def migrate_semantic_deltas(
         threshold: Minimum cosine similarity threshold (default: 0.70).
     """
     _ensure_superghidra_imported()
-    from superghidra.diff.semantic_delta_log import SemanticDeltaLog, DeltaMigrationEngine
+    from superghidra.diff.semantic_delta_log import DeltaMigrationEngine, SemanticDeltaLog
 
     safe_delta_log = str(_resolve_safe_path(delta_log_path, must_exist=True, for_write=False))
     delta_log = SemanticDeltaLog(safe_delta_log)
@@ -2234,7 +2265,7 @@ def migrate_semantic_deltas(
     engine = DeltaMigrationEngine(similarity_threshold=threshold)
     engine.run_diff_pairing(funcs_a, funcs_b)
 
-    report, migrated_events = engine.migrate_events(
+    report, _migrated_events = engine.migrate_events(
         baseline_events, target_log_path=safe_output_delta
     )
 
@@ -2286,7 +2317,10 @@ def preindex_dwarf_pdb(
         query_symbol_or_type: Optional symbol name or struct/type name to query and render.
     """
     _ensure_superghidra_imported()
-    from superghidra.formats.dwarf_pdb_preindexer import OffHeapTypeStore, TypeDeduplicator, NormalizedType, SymbolRecord
+    from superghidra.formats.dwarf_pdb_preindexer import (
+        OffHeapTypeStore,
+        TypeDeduplicator,
+    )
 
     if db_output_path and db_output_path != ":memory:":
         safe_db = str(_resolve_safe_path(db_output_path, must_exist=False, for_write=True, allowed_extensions={".sqlite", ".db", ".sqlite3", ".idx", ".bin"}))

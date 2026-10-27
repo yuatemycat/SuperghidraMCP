@@ -256,7 +256,7 @@ def create_project_context(
     raise RuntimeError(f"Could not create a usable fork of {project_spec.gpr_path}") from last_error
 
 
-def init_pyghidra_context(  # noqa: C901
+def init_pyghidra_context(
     mcp: MCPServer,
     *,
     transport: str,

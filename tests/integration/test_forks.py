@@ -111,7 +111,7 @@ async def test_locked_project_can_refuse_to_fork(test_binary, ghidra_env, isolat
     async with stdio_client(primary) as (read_a, write_a):
         async with ClientSession(read_a, write_a) as a:
             await a.initialize()
-            with pytest.raises(Exception):  # noqa: B017 - server exits before initialize
+            with pytest.raises(Exception):
                 async with stdio_client(secondary) as (read_b, write_b):
                     async with ClientSession(read_b, write_b) as b:
                         await b.initialize()

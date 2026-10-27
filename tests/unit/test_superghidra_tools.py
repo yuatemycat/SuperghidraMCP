@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 import struct
 import tempfile
 import time
@@ -15,27 +14,26 @@ import pytest
 
 from pyghidra_mcp import mcp_tools
 from pyghidra_mcp.models import (
+    ApkJniCrossRefResult,
+    BinaryDiffResult,
+    CFFDeflattenResult,
     ClearCacheResult,
+    DataflowQueryResult,
+    EmulatorMemoryVerifyResult,
     GovernorModeResult,
     GpuAdrpScanResult,
     GpuSeedFunctionsResult,
     HibernateResult,
+    MigrateSemanticDeltasResult,
+    NeuralDecompileSkinResult,
+    PreindexDwarfPdbResult,
     RvaTranslateResult,
     SmtVerificationResult,
-    SyntheticSymbolExportResult,
-    ApkJniCrossRefResult,
-    BinaryDiffResult,
-    EmulatorMemoryVerifyResult,
-    NeuralDecompileSkinResult,
-    MigrateSemanticDeltasResult,
-    PreindexDwarfPdbResult,
     StorageCompressionResult,
-    UsercallCompileResult,
-    CFFDeflattenResult,
-    DataflowQueryResult,
+    SyntheticSymbolExportResult,
     TypeLatticeResult,
+    UsercallCompileResult,
 )
-
 
 
 def test_rva_translate_forward_and_reverse():

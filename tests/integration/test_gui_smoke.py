@@ -22,7 +22,7 @@ def _find_free_port() -> int:
         return int(sock.getsockname()[1])
 
 
-async def _wait_for_http_server(  # noqa: C901
+async def _wait_for_http_server(
     base_url: str,
     proc: subprocess.Popen[str],
     env: dict[str, str],

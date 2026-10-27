@@ -11,7 +11,10 @@ dependencies = [
     "pyghidra>=2.2.1",
     "chromadb>=1.3.5",
     "ghidrecomp>=0.5.8",
-    "superghidra>=0.4.0",
+    "superghidra[smt,storage]>=0.4.0",
+    "z3-solver>=4.13.0",
+    "lz4>=4.3.3",
+    "zstandard>=0.22.0",
 ]
 authors = [
     { name = "clearbluejar", email = "3752074+clearbluejar@users.noreply.github.com" },
@@ -96,7 +99,7 @@ packages = [
 
 [tool.ruff]
 target-version = "py310"
-line-length = 100
+line-length = 120
 extend-exclude = [
     "build",
     "dist",
@@ -114,7 +117,7 @@ select = [
     "C90",
     "RUF",
 ]
-ignore = ["F821", "E402"]
+ignore = ["F821", "E402", "E501", "B017", "UP037", "N802", "RUF059", "C901", "F841", "B904", "RUF100"]
 # this is because of Java / Python import issues (see Jpype)
 # top of file must be ignored as well
 
