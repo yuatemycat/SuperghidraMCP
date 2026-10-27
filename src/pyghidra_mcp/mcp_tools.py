@@ -920,12 +920,7 @@ def _get_superghidra_path() -> str:
         os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
         "SuperGhidra",
     )
-    if os.path.exists(repo_sibling):
-        return repo_sibling
-    fallback = r"E:\02_Projects\SuperGhidra"
-    if os.path.exists(fallback):
-        logger.warning("SUPERGHIDRA_PATH unset; falling back to %s", fallback)
-    return fallback
+    return repo_sibling
 
 
 def _add_superghidra_dir(p: str):
@@ -955,10 +950,6 @@ def _ensure_superghidra_imported():
     if os.path.exists(repo_sibling):
         _add_superghidra_dir(repo_sibling)
         return
-
-    fallback_path = r"E:\02_Projects\SuperGhidra"
-    if os.path.exists(fallback_path):
-        _add_superghidra_dir(fallback_path)
 
 
 def _to_ghidra_addr(program: Any, offset: int) -> Any:

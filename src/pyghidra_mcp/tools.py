@@ -465,25 +465,9 @@ class GhidraTools:
                             get_default_mode_policy,
                         )
                     except ImportError:
-                        import sys
-                        env_sg = os.environ.get("SUPERGHIDRA_PATH")
-                        if env_sg and os.path.exists(env_sg) and env_sg not in sys.path:
-                            sys.path.insert(0, env_sg)
-                        else:
-                            candidates = [
-                                os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../SuperGhidra")),
-                                os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../SuperGhidra/src")),
-                                r"E:\02_Projects\SuperGhidra",
-                            ]
-                            for cand in candidates:
-                                if os.path.exists(cand):
-                                    logger.warning(
-                                        "SuperGhidra not found on sys.path or SUPERGHIDRA_PATH; falling back to %s",
-                                        cand,
-                                    )
-                                    if cand not in sys.path:
-                                        sys.path.insert(0, cand)
-                                    break
+                        from pyghidra_mcp.mcp_tools import _ensure_superghidra_imported
+
+                        _ensure_superghidra_imported()
                         from superghidra.core.resource_governor import (
                             DecompilerComplexityGovernor,
                             ResourceMode,
@@ -1547,25 +1531,9 @@ def migrate_struct_shifts(
     try:
         from superghidra.diff.struct_shift_migrator import migrate_struct_shifts as _sg_migrate
     except ImportError:
-        import sys
-        env_sg = os.environ.get("SUPERGHIDRA_PATH")
-        if env_sg and os.path.exists(env_sg) and env_sg not in sys.path:
-            sys.path.insert(0, env_sg)
-        else:
-            candidates = [
-                os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "SuperGhidra")),
-                os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "SuperGhidra", "src")),
-                r"E:\02_Projects\SuperGhidra",
-            ]
-            for cand in candidates:
-                if os.path.exists(cand):
-                    logger.warning(
-                        "SuperGhidra not found on sys.path or SUPERGHIDRA_PATH; falling back to %s",
-                        cand,
-                    )
-                    if cand not in sys.path:
-                        sys.path.insert(0, cand)
-                    break
+        from pyghidra_mcp.mcp_tools import _ensure_superghidra_imported
+
+        _ensure_superghidra_imported()
         from superghidra.diff.struct_shift_migrator import migrate_struct_shifts as _sg_migrate
     report = _sg_migrate(
         old_binary_path=old_binary_path,
