@@ -7,11 +7,11 @@ class FakeProgram:
     def __init__(self):
         self.ended = []
 
-    def startTransaction(self, description):  # noqa: N802
+    def startTransaction(self, description):
         self.description = description
         return 7
 
-    def endTransaction(self, tx_id, committed):  # noqa: N802
+    def endTransaction(self, tx_id, committed):
         self.ended.append((tx_id, committed))
 
 

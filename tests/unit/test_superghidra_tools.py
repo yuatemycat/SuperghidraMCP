@@ -61,7 +61,10 @@ def test_rva_translate_forward_and_reverse():
 def test_clear_cache():
     """Verify persistent L2 SQLite cache purging."""
     mcp_tools._ensure_superghidra_imported()
-    with patch("pyghidra_mcp.l2_cache.L2SQLiteCache") as mock_py_cache, patch("superghidra.core.ghidra_oracle.L2SQLiteCache") as mock_cache_cls:
+    with (
+        patch("pyghidra_mcp.l2_cache.L2SQLiteCache") as mock_py_cache,
+        patch("superghidra.core.ghidra_oracle.L2SQLiteCache") as mock_cache_cls,
+    ):
         mock_py_cache.return_value.clear.return_value = 0
         mock_instance = MagicMock()
         mock_instance.clear.return_value = 14
