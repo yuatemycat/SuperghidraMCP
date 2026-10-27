@@ -17,8 +17,7 @@ dependencies = [
     "zstandard>=0.22.0",
 ]
 authors = [
-    { name = "clearbluejar", email = "3752074+clearbluejar@users.noreply.github.com" },
-    { name = "notoriousrip", email = "3935212+unimpossible@users.noreply.github.com" },
+    { name = "yuatemycat", email = "344623529+yuatemycat@users.noreply.github.com" },
 ]
 keywords = [
     "security",
@@ -87,6 +86,7 @@ SuperghidraMCP = "pyghidra_mcp.server:main"
 [tool.hatch.build]
 include = [
     "src/pyghidra_mcp",
+    "src/superghidra_mcp",
 ]
 
 [tool.setuptools.packages.find]
@@ -95,6 +95,7 @@ where = ["src"]
 [tool.hatch.build.targets.wheel]
 packages = [
     "src/pyghidra_mcp",
+    "src/superghidra_mcp",
 ]
 
 [tool.ruff]
@@ -139,10 +140,3 @@ include = ["src"]
 extraPaths = ["src"]
 reportMissingModuleSource = false
 reportMissingImports = false
-reportAttributeAccessIssue = false
-reportOptionalMemberAccess = false
-reportGeneralTypeIssues = false
-reportInvalidTypeForm = false
-reportCallIssue = false
-reportArgumentType = false
-reportFunctionMemberAccess = false

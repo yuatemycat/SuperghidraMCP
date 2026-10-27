@@ -3,9 +3,9 @@
 </p>
 
 <p align="center">
-  <img align="center" alt="GitHub Workflow Status (with event)" src="https://img.shields.io/github/actions/workflow/status/clearbluejar/pyghidra-mcp/pytest-devcontainer-repo-all.yml?style=for-the-badge&label=pytest">
+  <img align="center" alt="GitHub Workflow Status (with event)" src="https://img.shields.io/github/actions/workflow/status/yuatemycat/SuperghidraMCP/pytest-devcontainer-repo-all.yml?style=for-the-badge&label=pytest">
   <img align="center" alt="PyPI - Downloads" src="https://img.shields.io/pypi/dm/pyghidra-mcp?color=yellow&label=PyPI%20downloads&style=for-the-badge">
-  <img align="center" src="https://img.shields.io/github/stars/clearbluejar/pyghidra-mcp?style=for-the-badge">
+  <img align="center" src="https://img.shields.io/github/stars/yuatemycat/SuperghidraMCP?style=for-the-badge">
 </p>
 
 # SuperghidraMCP - Ghidra Model Context Protocol Server
@@ -14,7 +14,7 @@
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3776AB.svg)](https://www.python.org/)
 
-**SuperghidraMCP** is the official Model Context Protocol (MCP) server for [SuperGhidra](https://github.com/yuatemycat/SuperGhidra), built on [pyghidra-mcp](https://github.com/clearbluejar/pyghidra-mcp). It exposes **38 tools** directly to AI agents (Claude Code, Antigravity, Cursor, Codex), featuring private session forks, persistent lock-free daemon cache, GPU ARM64 sweeps, Z3 SMT equivalence verification, and MSVC/MFC C++ recovery.
+**SuperghidraMCP** is the official Model Context Protocol (MCP) server for [SuperGhidra](https://github.com/yuatemycat/SuperGhidra), built on [pyghidra-mcp](https://github.com/yuatemycat/SuperghidraMCP). It exposes **38 tools** directly to AI agents (Claude Code, Antigravity, Cursor, Codex), featuring private session forks, persistent lock-free daemon cache, GPU ARM64 sweeps, Z3 SMT equivalence verification, and MSVC/MFC C++ recovery.
 
 ---
 
@@ -252,10 +252,10 @@ uvx pyghidra-mcp \
 > [!IMPORTANT]
 > `--gui` launches Ghidra through `pyghidra-mcp`. It does not attach to an already-running external Ghidra instance.
 
-Or, run as a [Docker container](https://ghcr.io/clearbluejar/pyghidra-mcp):
+Or, run as a [Docker container](https://ghcr.io/yuatemycat/superghidra-mcp):
 
 ```bash
-docker run --rm -p 8000:8000 ghcr.io/clearbluejar/pyghidra-mcp
+docker run --rm -p 8000:8000 ghcr.io/yuatemycat/superghidra-mcp
 ```
 
 ## Optimized for Agents
@@ -681,7 +681,7 @@ cp /path/to/your/binaries/* ./binaries/
 # Run the Docker container with volume mapping
 docker run -i --rm \
   -v "$(pwd)/binaries:/binaries" \
-  ghcr.io/clearbluejar/pyghidra-mcp \
+  ghcr.io/yuatemycat/superghidra-mcp \
   /binaries/*
 ```
 
@@ -711,7 +711,7 @@ pyghidra-mcp \
 #### Docker
 
 ```
-docker run -p 8000:8000 ghcr.io/clearbluejar/pyghidra-mcp
+docker run -p 8000:8000 ghcr.io/yuatemycat/superghidra-mcp
 ```
 
 ### Claude Code
@@ -763,7 +763,7 @@ Because the server communicates on standard input and output, it will appear to 
 #### Docker
 
 ```bash
-docker run -i --rm ghcr.io/clearbluejar/pyghidra-mcp -t stdio
+docker run -i --rm ghcr.io/yuatemycat/superghidra-mcp -t stdio
 ```
 
 The Docker image starts the Streamable HTTP server by default, so include `-t stdio` after the image name and use `-i` for [interactive](https://docs.docker.com/reference/cli/docker/container/run/#interactive) stdio mode.
@@ -783,7 +783,7 @@ uvx mcpo -- pyghidra-mcp /bin/ls
 #### With Docker
 
 ```bash
-uvx mcpo -- docker run -i --rm ghcr.io/clearbluejar/pyghidra-mcp /bin/ls
+uvx mcpo -- docker run -i --rm ghcr.io/yuatemycat/superghidra-mcp /bin/ls
 ```
 
 ### Server-sent events (SSE)
@@ -806,7 +806,7 @@ By default, the Python package will run in `stdio` mode, so you will have to inc
 #### Docker
 
 ```
-docker run -p 8000:8000 ghcr.io/clearbluejar/pyghidra-mcp -t sse
+docker run -p 8000:8000 ghcr.io/yuatemycat/superghidra-mcp -t sse
 ```
 
 ## Inspiration
@@ -844,4 +844,4 @@ This ensures consistency across the codebase and helps us maintain robust, scala
 
 ______________________________________________________________________
 
-Made with ❤️ by the [PyGhidra-MCP Team](https://github.com/clearbluejar/pyghidra-mcp)
+Made with ❤️ by the [PyGhidra-MCP Team](https://github.com/yuatemycat/SuperghidraMCP)

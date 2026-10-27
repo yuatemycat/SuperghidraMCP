@@ -50,14 +50,14 @@ jobs:
           python -m venv .venv
           source .venv/bin/activate
 
-          # If Ghidra major version is 11, pin pyghidra==2.2.1 first
+          # Install package in editable mode with dev extras
+          pip install -e .[dev]
+
+          # If Ghidra major version is 11, pin pyghidra==2.2.1
           if [[ "$GHIDRA_VERSION" == 11.* ]]; then
             echo "Detected Ghidra $GHIDRA_VERSION, pinning pyghidra==2.2.1..."
             pip install "pyghidra==2.2.1"
           fi
-
-          # Install package in editable mode with dev extras
-          pip install -e .[dev]
 
           # Run tests
           python -m pytest tests/unit/ --doctest-modules --junitxml=junit/unit-test-results-${{ matrix.image }}.xml

@@ -15,7 +15,7 @@ env:
 jobs:
   docker-build:
     if: ${{ !contains(github.event.pull_request.labels.*.name, 'no-build') }}
-    name: Build Docker image (ghcr.io/clearbluejar/pyghidra-mcp)
+    name: Build Docker image (ghcr.io/yuatemycat/superghidra-mcp)
     runs-on: ubuntu-latest
     env:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}

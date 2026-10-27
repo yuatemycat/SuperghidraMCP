@@ -1,5 +1,15 @@
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from . import server
+    from .context import ProgramInfo, PyGhidraContext
+    from .decompiler_pool import DecompilerPool
+    from .l2_cache import L2SQLiteCache
+    from .server import main
+    from .tools import GhidraTools
+
 __version__ = "0.4.0"
-__author__ = "clearbluejar"
+__author__ = "yuatemycat"
 
 
 def main() -> None:

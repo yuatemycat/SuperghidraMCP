@@ -5,4 +5,4 @@ interface to interact with Ghidra binary analysis via CLI
 """
 
 __version__ = "0.2.7"
-__author__ = "clearbluejar"
+__author__ = "yuatemycat"

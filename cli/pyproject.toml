@@ -1,7 +1,10 @@
 [project]
-name = "pyghidra-mcp-cli"
+name = "superghidra-mcp-cli"
 version = "0.2.7"
-description = "Command-line client for pyghidra-mcp server"
+description = "Command-line client for superghidra-mcp server"
+authors = [
+    { name = "yuatemycat", email = "344623529+yuatemycat@users.noreply.github.com" },
+]
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -11,6 +14,7 @@ dependencies = [
 ]
 
 [project.scripts]
+superghidra-mcp-cli = "pyghidra_mcp_cli.main:cli"
 pyghidra-mcp-cli = "pyghidra_mcp_cli.main:cli"
 
 [project.optional-dependencies]

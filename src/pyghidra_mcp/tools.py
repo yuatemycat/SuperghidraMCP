@@ -93,8 +93,8 @@ class GhidraTools:
         self.decompiler_pool = program_info.decompiler_pool
         if l2_cache is not None:
             self.l2_cache = l2_cache
-        elif hasattr(program_info, "l2_cache") and program_info.l2_cache is not None:
-            self.l2_cache = program_info.l2_cache
+        elif getattr(program_info, "l2_cache", None) is not None:
+            self.l2_cache = typing.cast(typing.Any, program_info).l2_cache
         else:
             from pyghidra_mcp.l2_cache import get_l2_cache
 
@@ -117,9 +117,9 @@ class GhidraTools:
                 self._delta_log = semantic_delta_log.SemanticDeltaLog(log_path)
 
             factory = getattr(semantic_delta_log.SemanticEvent, event_fn_name, None)
-            if factory and callable(factory):
+            if factory and callable(factory) and self._delta_log is not None:
                 evt = factory(*args, **kwargs)
-                self._delta_log.append(evt)
+                self._delta_log.append(typing.cast(typing.Any, evt))
         except Exception as e:
             logger.debug("Non-fatal: failed to record semantic delta: %s", e)
 

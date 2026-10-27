@@ -10,6 +10,7 @@ import threading
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any, cast
 
 import click
 import pyghidra
@@ -192,7 +193,9 @@ register_common_tools(mcp)
 def _set_server_instructions(mcp: MCPServer, context: object) -> None:
     """Tell clients at initialize time whether this session is a fork."""
     try:
-        mcp._lowlevel_server.instructions = forks.server_instructions(context)
+        lowlevel = getattr(mcp, '_lowlevel_server', None)
+        if lowlevel is not None:
+            lowlevel.instructions = forks.server_instructions(context)
     except Exception:
         logger.debug("Could not set server instructions", exc_info=True)
 
@@ -405,7 +408,7 @@ def run_mcp_server(
     if transport == "stdio":
         mcp.run(transport="stdio")
     elif transport in ["streamable-http", "http"]:
-        mcp.run(transport="streamable-http", host=host, port=port)
+        cast(Any, mcp).run(transport="streamable-http", host=host, port=port)
     elif transport == "sse":
         import warnings
 
@@ -415,7 +418,7 @@ def run_mcp_server(
             DeprecationWarning,
             stacklevel=1,
         )
-        mcp.run(transport="sse", host=host, port=port)
+        cast(Any, mcp).run(transport="sse", host=host, port=port)
     else:
         raise ValueError(f"Invalid transport: {transport}")
 

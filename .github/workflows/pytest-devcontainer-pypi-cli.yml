@@ -64,25 +64,13 @@ jobs:
             uv pip install "pyghidra==2.2.1"
           fi
 
-          # Test the version that triggered this release, not a cached older
-          # PyPI version. Scheduled and manual runs continue to test latest.
-          RELEASE_TAG="${{ github.event.release.tag_name || inputs.version }}"
-          PACKAGE_SPEC="pyghidra-mcp-cli[dev]"
-          if [ -n "$RELEASE_TAG" ]; then
-            RELEASE_VERSION="${RELEASE_TAG#v}"
-            PACKAGE_SPEC="${PACKAGE_SPEC}==${RELEASE_VERSION}"
-          fi
-          for attempt in $(seq 1 12); do
-            if uv pip install --refresh "$PACKAGE_SPEC"; then
-              break
-            fi
-            if [ "$attempt" -eq 12 ]; then
-              exit 1
-            fi
-            sleep 10
-          done
-          if [ -n "$RELEASE_TAG" ]; then
-            python -c 'import importlib.metadata as m, sys; assert all(m.version(p) == sys.argv[1] for p in ("pyghidra-mcp", "pyghidra-mcp-cli"))' "$RELEASE_VERSION"
+          # Point to local repository source
+          uv pip install -e .
+          uv pip install -e ./cli[dev]
+
+          if [[ "$GHIDRA_VERSION" == 11.* ]]; then
+            echo "Detected Ghidra $GHIDRA_VERSION, pinning pyghidra==2.2.1..."
+            uv pip install "pyghidra==2.2.1"
           fi
           
           # Change to CLI directory where the tests are located

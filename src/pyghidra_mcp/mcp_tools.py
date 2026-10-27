@@ -13,18 +13,22 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
-try:
-    from mcp.server.mcpserver import Context
-    from mcp.server.mcpserver.exceptions import ToolError
-except ImportError:
+if TYPE_CHECKING:
+    from mcp.server.fastmcp import Context
+    from mcp.shared.exceptions import McpError as ToolError
+else:
     try:
-        from mcp.server.fastmcp import Context
-        from mcp.shared.exceptions import McpError as ToolError
+        from mcp.server.mcpserver import Context
+        from mcp.server.mcpserver.exceptions import ToolError
     except ImportError:
-        Context = Any  # type: ignore
-        ToolError = Exception  # type: ignore
+        try:
+            from mcp.server.fastmcp import Context
+            from mcp.shared.exceptions import McpError as ToolError
+        except ImportError:
+            Context = Any
+            ToolError = Exception
 
 from pyghidra_mcp import forks
 from pyghidra_mcp.context_protocol import MCPContext
@@ -171,7 +175,7 @@ def mcp_error_handler(func):
             return e
         msg = str(e) if isinstance(e, ValueError) else f"Error {action}: {e!s}"
         try:
-            return ToolError(msg)
+            return ToolError(msg)  # type: ignore
         except (TypeError, AttributeError):
             try:
                 from mcp.types import INTERNAL_ERROR, INVALID_PARAMS, ErrorData
@@ -1307,7 +1311,7 @@ def set_governor_mode(
         if hasattr(p_info, "decompiler_pool") and p_info.decompiler_pool:
             res_dict = p_info.decompiler_pool.set_resource_mode(mode_str)
     elif getattr(pyghidra_context, "open_programs", None):
-        for p_info in pyghidra_context.open_programs.values():
+        for p_info in getattr(pyghidra_context, "open_programs", {}).values():
             if hasattr(p_info, "decompiler_pool") and p_info.decompiler_pool:
                 res_dict = p_info.decompiler_pool.set_resource_mode(mode_str)
 
@@ -1343,7 +1347,7 @@ def hibernate(ctx: Context) -> HibernateResult:
     """Calls program_info.decompiler_pool.hibernate() and reclaims idle JVM memory."""
     pyghidra_context = _get_pyghidra_context(ctx)
     if getattr(pyghidra_context, "open_programs", None):
-        for p_info in pyghidra_context.open_programs.values():
+        for p_info in getattr(pyghidra_context, "open_programs", {}).values():
             if hasattr(p_info, "decompiler_pool") and p_info.decompiler_pool:
                 p_info.decompiler_pool.hibernate()
 
@@ -1388,7 +1392,7 @@ def clear_cache(ctx: Context | None = None) -> ClearCacheResult:
         try:
             pyghidra_context = _get_pyghidra_context(ctx)
             if getattr(pyghidra_context, "open_programs", None):
-                for p_info in pyghidra_context.open_programs.values():
+                for p_info in getattr(pyghidra_context, "open_programs", {}).values():
                     if hasattr(p_info, "decompiler_pool") and p_info.decompiler_pool:
                         p_info.decompiler_pool.invalidate_all()
         except Exception:
@@ -1702,7 +1706,7 @@ def cross_reference_apk_jni(
         with open(safe_so, "rb") as f_so:
             raw_so = f_so.read()
         if hasattr(ref, "extract_elf_jni_exports"):
-            ref.extract_elf_jni_exports(raw_so)
+            cast(Any, ref).extract_elf_jni_exports(raw_so)
         else:
             ref.load_from_elf_bytes(raw_so)
 
@@ -1878,6 +1882,8 @@ def _parse_functions_for_diff(input_str: str) -> tuple[list[Any], bool]:
 
     cfgs: list[FunctionCFG] = []
     for idx, item in enumerate(data):
+        if not isinstance(item, dict):
+            continue
         func_id = str(item.get("func_id", item.get("name", f"func_{idx}")))
         address = int(item.get("address", 0x1000 + idx * 0x100))
         name = str(item.get("name", func_id))
@@ -2099,7 +2105,7 @@ def verify_emulator_memory(
         else:
             expected_list = [f"0x{rva_int + 0x100 + i * 0x40:X}" for i in range(expected_slots)]
 
-        res = verify_vtable_pointer(reader, rva=rva_int, expected_slots=expected_list)
+        res = verify_vtable_pointer(reader, rva=rva_int, expected_slots=cast(Any, expected_list))
         return EmulatorMemoryVerifyResult(
             status=result_status,
             device_serial=device_serial,
@@ -2565,7 +2571,7 @@ def trace_serialize(
     for t in traces[:limit]:
         d = t.to_dict()
         for key in ("loading", "storing"):
-            for op in d[key]:
+            for op in cast(list[dict[str, Any]], d.get(key, [])):
                 op.pop("conditions", None)
                 op.pop("via", None)
         if path == "loading":
@@ -2626,15 +2632,19 @@ def decode_carchive(
         cal = mfc_archive.calibrate(data, layouts, start=int(offset))
         if cal.get("variable") is not None:
             use_env = {cal["variable"]: cal["value"]}
+        cal_trials = cast(list[dict[str, Any]], cal.get("trials", []))
         cal = {"variable": cal.get("variable"), "value": cal.get("value"),
                "max_known_threshold": cal.get("max_known_threshold"), "warning": cal.get("warning"),
-               "trials": sorted(cal.get("trials", []), key=lambda t: -t["decoded_bytes"])[:10]}
-    res: dict[str, Any] = cast(dict[str, Any], mfc_archive.decode_stream(data, layouts, start=int(offset), env=use_env))
+               "trials": sorted(cal_trials, key=lambda t: -t["decoded_bytes"])[:10]}
+    res: dict[str, Any] = cast(
+        dict[str, Any],
+        mfc_archive.decode_stream(data, layouts, start=int(offset), env=cast(Any, use_env)),
+    )
     limit = max(0, min(int(limit), 20000))
     s: dict[str, Any] = cast(dict[str, Any], res["stats"])
     return DecodeCArchiveResult(
         stream_path=str(sp), length=res["length"], layout_binaries=[str(b) for b in bins], layouts=len(layouts),
-        env=use_env, calibration=cal, stats=s, map_reliable=res["map_reliable"], classes=res["classes"],
+        env=cast(Any, use_env), calibration=cal, stats=s, map_reliable=res["map_reliable"], classes=res["classes"],
         gaps=res["gaps"], objects=res["objects"][:limit], truncated=len(res["objects"]) > limit,
         message=(f"{s['decoded']} objects decoded, {s['partial']} partial, {s['opaque']} without layout, "
                  f"{s.get('error', 0)} malformed; {sum(g['length'] for g in res['gaps'])} of {res['length']} "
