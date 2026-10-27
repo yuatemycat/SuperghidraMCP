@@ -839,7 +839,15 @@ class PyGhidraContext(IndexingMixin):
             or self.force_analysis
         ):
             with self._analysis_bundle_host_lock:
-                GhidraScriptUtil.acquireBundleHostReference()
+                bundle_host_acquired = False
+                try:
+                    GhidraScriptUtil.acquireBundleHostReference()
+                    bundle_host_acquired = True
+                except Exception as exc:
+                    if "initialized multiple times" in str(exc):
+                        logger.debug("Bundle host already initialized, proceeding: %s", exc)
+                    else:
+                        raise
 
                 try:
                     self.set_analysis_option(program, "Non-Returning Functions - Discovered", False)
@@ -902,7 +910,11 @@ class PyGhidraContext(IndexingMixin):
                     else:
                         raise Exception("Missing set analyzed flag method!")
                 finally:
-                    GhidraScriptUtil.releaseBundleHostReference()
+                    if bundle_host_acquired:
+                        try:
+                            GhidraScriptUtil.releaseBundleHostReference()
+                        except Exception:
+                            pass
                     self.project.save(program)
         else:
             logger.info(f"Analysis already complete.. skipping {program}!")

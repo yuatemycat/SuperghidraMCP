@@ -48,7 +48,7 @@ void hello() {
 """
         )
         bin_file_2 = lib_dir / "program2.so"
-        os.system(f"gcc -shared -o {bin_file_2} {c_file_2}")
+        os.system(f"gcc -fPIC -shared -o {bin_file_2} {c_file_2}")
 
         # Create a non-binary file (should be skipped)
         readme = root / "README.txt"

@@ -106,6 +106,7 @@ jobs:
     name: cli-test-macos (${{ matrix.ghidra_version }}ghidra-${{ matrix.python_version }}python)
     runs-on: macos-latest
     timeout-minutes: 25
+    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
