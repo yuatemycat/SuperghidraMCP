@@ -936,16 +936,10 @@ def _add_superghidra_dir(p: str):
 
 
 def _ensure_superghidra_imported():
-    try:
-        from superghidra.acceleration import gpu_adrp_scanner  # noqa: F401
-        return
-    except ImportError:
-        pass
-
+    # Always prioritize local SuperGhidra repository over any installed package
     env_path = os.environ.get("SUPERGHIDRA_PATH")
     if env_path and os.path.exists(env_path):
         _add_superghidra_dir(env_path)
-        return
 
     repo_sibling = os.path.join(
         os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
@@ -953,7 +947,6 @@ def _ensure_superghidra_imported():
     )
     if os.path.exists(repo_sibling):
         _add_superghidra_dir(repo_sibling)
-        return
 
 
 def _to_ghidra_addr(program: Any, offset: int) -> Any:

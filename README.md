@@ -4,8 +4,7 @@
 
 <p align="center">
   <img align="center" alt="GitHub Workflow Status (with event)" src="https://img.shields.io/github/actions/workflow/status/yuatemycat/SuperghidraMCP/pytest-devcontainer-repo-all.yml?style=for-the-badge&label=pytest">
-  <img align="center" alt="PyPI - Downloads" src="https://img.shields.io/pypi/dm/pyghidra-mcp?color=yellow&label=PyPI%20downloads&style=for-the-badge">
-  <img align="center" src="https://img.shields.io/github/stars/yuatemycat/SuperghidraMCP?style=for-the-badge">
+<img align="center" src="https://img.shields.io/github/stars/yuatemycat/SuperghidraMCP?style=for-the-badge">
 </p>
 
 # SuperghidraMCP - Ghidra Model Context Protocol Server
@@ -14,7 +13,7 @@
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3776AB.svg)](https://www.python.org/)
 
-**SuperghidraMCP** is the official Model Context Protocol (MCP) server for [SuperGhidra](https://github.com/yuatemycat/SuperGhidra), built on [pyghidra-mcp](https://github.com/yuatemycat/SuperghidraMCP). It exposes **38 tools** directly to AI agents (Claude Code, Antigravity, Cursor, Codex), featuring private session forks, persistent lock-free daemon cache, GPU ARM64 sweeps, Z3 SMT equivalence verification, and MSVC/MFC C++ recovery.
+**SuperghidraMCP** is the official Model Context Protocol (MCP) server for [SuperGhidra](https://github.com/yuatemycat/SuperGhidra), built on [pyghidra-mcp](https://github.com/clearbluejar/pyghidra-mcp). It exposes **38 tools** directly to AI agents (Claude Code, Antigravity, Cursor, Codex), featuring private session forks, persistent lock-free daemon cache, GPU ARM64 sweeps, Z3 SMT equivalence verification, and MSVC/MFC C++ recovery.
 
 ---
 
@@ -22,17 +21,17 @@
 
 ### Overview
 
-**`pyghidra-mcp`** is a command-line Model Context Protocol (MCP) server that brings the full analytical power of [Ghidra](https://ghidra-sre.org/), a robust software reverse engineering (SRE) suite, into the world of intelligent agents and LLM-based tooling.
+**`superghidra-mcp`** is a command-line Model Context Protocol (MCP) server that brings the full analytical power of [Ghidra](https://ghidra-sre.org/), a robust software reverse engineering (SRE) suite, into the world of intelligent agents and LLM-based tooling.
 It bridges Ghidra’s [ProgramAPI](https://ghidra.re/ghidra_docs/api/ghidra/program/model/listing/Program.html) and [FlatProgramAPI](https://ghidra.re/ghidra_docs/api/ghidra/program/flatapi/FlatProgramAPI.html) to Python using `pyghidra` and `jpype`, then exposes that functionality via the Model Context Protocol. 
 
 MCP is a unified interface that allows language models, development tools (like VS Code), and autonomous agents to access structured context, invoke tooling, and collaborate intelligently. Think of MCP as the bridge between powerful analysis tools and the LLM ecosystem. 
 
-With `pyghidra-mcp`, Ghidra becomes an intelligent backend—ready to respond to context-rich queries, automate deep reverse engineering tasks, and integrate into AI-assisted workflows.
+With `superghidra-mcp`, Ghidra becomes an intelligent backend—ready to respond to context-rich queries, automate deep reverse engineering tasks, and integrate into AI-assisted workflows.
 
-`pyghidra-mcp` now supports two operating modes:
+`superghidra-mcp` now supports two operating modes:
 
 - `headless` mode for CLI-driven analysis and automation
-- `--gui` mode, which launches Ghidra through `pyghidra-mcp` and shares live program state with the running GUI
+- `--gui` mode, which launches Ghidra through `superghidra-mcp` and shares live program state with the running GUI
 
 
 > [!NOTE]
@@ -40,7 +39,7 @@ With `pyghidra-mcp`, Ghidra becomes an intelligent backend—ready to respond to
 
 ## Yet another Ghidra MCP?
 
-Yes, the original [ghidra-mcp](https://github.com/LaurieWired/GhidraMCP) is fantastic. But `pyghidra-mcp` takes a different approach:
+Yes, the original [ghidra-mcp](https://github.com/LaurieWired/GhidraMCP) is fantastic. But `superghidra-mcp` takes a different approach:
 
 - 🐍 **Headless-first, GUI-capable** – Run entirely via CLI for streamlined automation, or launch Ghidra with `--gui` when you want live GUI navigation and edits.
 - 🔁 **Designed for automation** – Ideal for integrating with LLMs, CI pipelines, and tooling that needs repeatable behavior.
@@ -60,11 +59,11 @@ This project provides a Python-first experience optimized for local development,
 flowchart LR
     subgraph Clients["Clients"]
         Agent["MCP host / agent"]
-        Cli["pyghidra-mcp-cli"]
+        Cli["superghidra-mcp-cli"]
         User["Ghidra user"]
     end
 
-    subgraph Process["pyghidra-mcp process"]
+    subgraph Process["superghidra-mcp process"]
         Transport["streamable HTTP (recommended)<br/>stdio (local fallback)"]
         Tools["MCP tools"]
         Context["PyGhidra context"]
@@ -94,15 +93,15 @@ flowchart TD
     Start --> GuiNeed["Live Ghidra GUI control"]
     Start --> Terminal["Interactive terminal client"]
 
-    Headless --> Http["pyghidra-mcp<br/>--transport streamable-http"]
-    GuiNeed --> GuiMode["pyghidra-mcp --gui<br/>--transport streamable-http<br/>--project-path project.gpr"]
-    Terminal --> HttpServer["Start pyghidra-mcp<br/>--transport streamable-http"]
-    HttpServer --> CliMode["Run pyghidra-mcp-cli commands"]
+    Headless --> Http["superghidra-mcp<br/>--transport streamable-http"]
+    GuiNeed --> GuiMode["superghidra-mcp --gui<br/>--transport streamable-http<br/>--project-path project.gpr"]
+    Terminal --> HttpServer["Start superghidra-mcp<br/>--transport streamable-http"]
+    HttpServer --> CliMode["Run superghidra-mcp-cli commands"]
 ```
 
 - **Headless MCP**: use `streamable-http`. It keeps Ghidra and its project alive as one long-running server and works with both MCP hosts and the CLI client.
-- **GUI mode**: `pyghidra-mcp` launches Ghidra, opens the project, and exposes extra tools that steer the CodeBrowser in the same JVM.
-- **CLI client**: `pyghidra-mcp-cli` is an HTTP client. Start a `streamable-http` server first, then issue terminal commands against that running server.
+- **GUI mode**: `superghidra-mcp` launches Ghidra, opens the project, and exposes extra tools that steer the CodeBrowser in the same JVM.
+- **CLI client**: `superghidra-mcp-cli` is an HTTP client. Start a `streamable-http` server first, then issue terminal commands against that running server.
 - **stdio**: retain this only for MCP hosts that cannot connect to an HTTP endpoint.
 
 <details>
@@ -112,7 +111,7 @@ flowchart TD
 flowchart TD
     subgraph Clients
         Agent["LLM / MCP host"]
-        Cli["pyghidra-mcp-cli"]
+        Cli["superghidra-mcp-cli"]
         Automation["scripts and CI"]
     end
 
@@ -122,7 +121,7 @@ flowchart TD
         Sse["sse legacy"]
     end
 
-    subgraph Server["pyghidra-mcp server"]
+    subgraph Server["superghidra-mcp server"]
         McpServer["MCPServer tool server"]
         Context["PyGhidra context"]
         Indexing["background analysis and Chroma indexing"]
@@ -171,7 +170,7 @@ flowchart TD
 
 ## Contents
 
-- [PyGhidra-MCP - Ghidra Model Context Protocol Server](#pyghidra-mcp---ghidra-model-context-protocol-server)
+- [SuperghidraMCP - Ghidra Model Context Protocol Server](#superghidra-mcp---ghidra-model-context-protocol-server)
     - [Overview](#overview)
   - [Yet another Ghidra MCP?](#yet-another-ghidra-mcp)
   - [Setup Diagrams](#setup-diagrams)
@@ -226,10 +225,10 @@ flowchart TD
 
 ## Getting started
 
-Start a persistent Streamable HTTP server using the [Python package](https://pypi.org/p/pyghidra-mcp) and [`uv`](https://docs.astral.sh/uv/guides/tools/):
+Start a persistent Streamable HTTP server using the [Python package](https://pypi.org/p/superghidra-mcp) and [`uv`](https://docs.astral.sh/uv/guides/tools/):
 
 ```bash
-uvx pyghidra-mcp \
+uvx superghidra-mcp \
   --transport streamable-http \
   --project-path /absolute/path/to/ghidra-projects \
   /absolute/path/to/binary
@@ -240,7 +239,7 @@ The server is then available at `http://127.0.0.1:8000/mcp`. Leave it running an
 To launch and control a live Ghidra GUI from MCP, use `--gui` with `streamable-http`:
 
 ```bash
-uvx pyghidra-mcp \
+uvx superghidra-mcp \
   --gui \
   --transport streamable-http \
   --host 127.0.0.1 \
@@ -250,7 +249,7 @@ uvx pyghidra-mcp \
 ```
 
 > [!IMPORTANT]
-> `--gui` launches Ghidra through `pyghidra-mcp`. It does not attach to an already-running external Ghidra instance.
+> `--gui` launches Ghidra through `superghidra-mcp`. It does not attach to an already-running external Ghidra instance.
 
 Or, run as a [Docker container](https://ghcr.io/yuatemycat/superghidra-mcp):
 
@@ -260,57 +259,57 @@ docker run --rm -p 8000:8000 ghcr.io/yuatemycat/superghidra-mcp
 
 ## Optimized for Agents
 
-`pyghidra-mcp` keeps the MCP surface intentionally narrow so agent clients spend fewer tokens on tool discovery and argument selection.
+`superghidra-mcp` keeps the MCP surface intentionally narrow so agent clients spend fewer tokens on tool discovery and argument selection.
 
 - **Short tool descriptions**: MCP tool docstrings are kept compact so MCPServer tool schemas stay small and cheap to send to models.
 - **Context discipline**: tools return focused structured data instead of dumping whole-program context by default. Decompilation, symbol search, and cross-reference results are shaped to support iterative analysis rather than one large response.
 - **GUI tools only when relevant**: GUI-only controls such as `open_program_in_gui`, `list_open_programs`, `set_current_program`, and `goto` are only exposed when the server is started with `--gui`.
-- **CLI is optional**: if MCP is not your preferred interface, `pyghidra-mcp-cli` provides a direct command-line client over HTTP with grouped commands for common edit and analysis workflows.
+- **CLI is optional**: if MCP is not your preferred interface, `superghidra-mcp-cli` provides a direct command-line client over HTTP with grouped commands for common edit and analysis workflows.
 
 This keeps the default server usable for LLM agents, IDE integrations, and automation without exposing unnecessary tool surface or GUI-only controls in headless sessions.
 
 ## CLI Client
 
-For a more interactive command-line experience, you can use the separate **pyghidra-mcp-cli** package, which provides a user-friendly interface for interacting with a running pyghidra-mcp server.
+For a more interactive command-line experience, you can use the separate **superghidra-mcp-cli** package, which provides a user-friendly interface for interacting with a running superghidra-mcp server.
 
 ### Installation
 
 Install the CLI client using [`uv`](https://docs.astral.sh/uv/) (recommended):
 
 ```bash
-uvx pyghidra-mcp-cli
+uvx superghidra-mcp-cli
 ```
 
 Or install with pip:
 
 ```bash
-pip install pyghidra-mcp-cli
+pip install superghidra-mcp-cli
 ```
 
 ### Quick Start with CLI
 
 1. **Start the server** (in one terminal):
 ```bash
-pyghidra-mcp --transport streamable-http /bin/ls
+superghidra-mcp --transport streamable-http /bin/ls
 ```
 
 2. **Use the CLI** (in another terminal):
 ```bash
 # List available binaries
-pyghidra-mcp-cli list binaries
+superghidra-mcp-cli list binaries
 
 # Decompile a function
-pyghidra-mcp-cli decompile --binary ls main
+superghidra-mcp-cli decompile --binary ls main
 
 # Decompile with callees, referenced strings, and cross-references
-pyghidra-mcp-cli decompile --binary ls main --callees --strings --xrefs
+superghidra-mcp-cli decompile --binary ls main --callees --strings --xrefs
 
 # Search for symbols (supports regex patterns)
-pyghidra-mcp-cli search symbols --binary ls printf -l 10
+superghidra-mcp-cli search symbols --binary ls printf -l 10
 ```
 
 > [!NOTE]
-> The CLI connects to pyghidra-mcp via HTTP to avoid the 10-60 second startup overhead of spawning a new Ghidra process for each command. See the [CLI README](./cli/README.md) for complete documentation.
+> The CLI connects to superghidra-mcp via HTTP to avoid the 10-60 second startup overhead of spawning a new Ghidra process for each command. See the [CLI README](./cli/README.md) for complete documentation.
 
 ## Project Creation, Management, and Opening Existing Projects
 
@@ -320,19 +319,19 @@ You can create new projects in several ways, depending on your workflow:
 
 #### Self-Contained Project Structure
 
-`pyghidra-mcp` creates a **self-contained project structure** where each project has its own Ghidra project and pyghidra-mcp artifacts. This ensures complete isolation and easy project management.
+`superghidra-mcp` creates a **self-contained project structure** where each project has its own Ghidra project and superghidra-mcp artifacts. This ensures complete isolation and easy project management.
 
 #### Basic Project Creation
 
 ```bash
 # Create a new project with default settings
-pyghidra-mcp
+superghidra-mcp
 
 # Creates: 
-$ tree pyghidra_mcp_projects/
-pyghidra_mcp_projects/
+$ tree superghidra_mcp_projects/
+superghidra_mcp_projects/
 ├── my_project.gpr
-├── my_project-pyghidra-mcp
+├── my_project-superghidra-mcp
 │   ├── chromadb
 │   └── gzfs
 └── my_project.rep
@@ -342,13 +341,13 @@ pyghidra_mcp_projects/
 
 ```bash
 # Create project with custom name and location
-pyghidra-mcp --project-path ~/analysis/malware_study --project-name malware_analysis
+superghidra-mcp --project-path ~/analysis/malware_study --project-name malware_analysis
 
 $ tree ~/analysis/ 
 /home/vscode/analysis/
 └── malware_study
     ├── malware_analysis.gpr
-    ├── malware_analysis-pyghidra-mcp
+    ├── malware_analysis-superghidra-mcp
     │   ├── chromadb
     │   └── gzfs
     └── malware_analysis.rep
@@ -361,24 +360,24 @@ $ tree ~/analysis/
 mkdir ~/reverse_engineering_workspace
 
 # Project for suspicious binaries
-pyghidra-mcp --project-path ~/reverse_engineering_workspace/suspicious_binaries --project-name suspicious_analysis
+superghidra-mcp --project-path ~/reverse_engineering_workspace/suspicious_binaries --project-name suspicious_analysis
 
 # Project for packed malware  
-pyghidra-mcp --project-path ~/reverse_engineering_workspace/packed_malware --project-name packed_analysis
+superghidra-mcp --project-path ~/reverse_engineering_workspace/packed_malware --project-name packed_analysis
 ```
 
 ### Opening Existing Ghidra Projects
 
-If you have existing Ghidra projects (`.gpr` files), you can open them directly with `pyghidra-mcp`:
+If you have existing Ghidra projects (`.gpr` files), you can open them directly with `superghidra-mcp`:
 
 #### Opening by .gpr File
 
 ```bash
 # Open existing Ghidra project (project name derived from filename)
-pyghidra-mcp --project-path ~/existing/ghidra/my_research.gpr
+superghidra-mcp --project-path ~/existing/ghidra/my_research.gpr
 
-# Result: ~/existing/ghidra/my_research-pyghidra-mcp/
-# └── chromadb/, gzfs/ (pyghidra-mcp additions)
+# Result: ~/existing/ghidra/my_research-superghidra-mcp/
+# └── chromadb/, gzfs/ (superghidra-mcp additions)
 ```
 
 ### GUI Mode
@@ -387,13 +386,13 @@ Use GUI mode when you want MCP actions to operate against the same live program 
 
 - `--gui` requires `--transport streamable-http` (or `--transport http` as an alias)
 - `--project-path` can be a project directory plus `--project-name`, or an existing `.gpr` file. Missing projects are created automatically.
-- Ghidra is launched by `pyghidra-mcp`, which keeps GUI and MCP transactions in the same JVM
+- Ghidra is launched by `superghidra-mcp`, which keeps GUI and MCP transactions in the same JVM
 - GUI-only tools are only exposed when running with `--gui`
 
 Example:
 
 ```bash
-pyghidra-mcp \
+superghidra-mcp \
   --gui \
   --transport streamable-http \
   --project-path /absolute/path/to/my_research.gpr
@@ -407,7 +406,7 @@ GUI mode is the right choice when you want to:
 
 ### Startup Defaults and Large Projects
 
-`pyghidra-mcp` does not require `--wait-for-analysis` by default. The server can start while analysis and MCP-side indexing continue in the background.
+`superghidra-mcp` does not require `--wait-for-analysis` by default. The server can start while analysis and MCP-side indexing continue in the background.
 
 This matters for large projects:
 
@@ -437,7 +436,7 @@ Ghidra lets only one process open a project for writing. There are two ways for 
 ```mermaid
 flowchart LR
     A["Agent A<br/>(primary)"] --> P["main project<br/>shared.gpr"]
-    B["Agent B"] -->|"project locked"| F["fork<br/>shared-pyghidra-mcp/forks/&lt;id&gt;"]
+    B["Agent B"] -->|"project locked"| F["fork<br/>shared-superghidra-mcp/forks/&lt;id&gt;"]
     F -->|"journal.jsonl:<br/>renames, types,<br/>prototypes, comments"| M["merge_fork<br/>(run by A)"]
     M --> P
 ```
@@ -459,7 +458,7 @@ Example: two agents configured with the same stdio command, differing only in la
 {
   "mcpServers": {
     "pyghidra": {
-      "command": "pyghidra-mcp",
+      "command": "superghidra-mcp",
       "args": ["-t", "stdio", "--project-path", "/re/shared.gpr", "--fork-label", "claude"]
     }
   }
@@ -610,7 +609,7 @@ See [Multiple Agents on One Project](#multiple-agents-on-one-project).
 
 #### GUI Control Tools (`--gui` only)
 
-These tools are only available when `pyghidra-mcp` is started with `--gui` and control what the GUI is showing rather than mutating project data directly:
+These tools are only available when `superghidra-mcp` is started with `--gui` and control what the GUI is showing rather than mutating project data directly:
 
 - `list_open_programs()`: List programs currently open in the Ghidra GUI.
 - `open_program_in_gui(binary_name: str, new_window: bool = True)`: Open a project binary in CodeBrowser. By default this opens a new CodeBrowser window. Set `new_window=false` to reuse a visible CodeBrowser when possible.
@@ -619,11 +618,11 @@ These tools are only available when `pyghidra-mcp` is started with `--gui` and c
 
 ## Usage
 
-This Python package is published to PyPI as [pyghidra-mcp](https://pypi.org/p/pyghidra-mcp) and can be installed and run with [pip](https://packaging.python.org/en/latest/guides/installing-using-pip-and-virtual-environments/#install-a-package), [pipx](https://pipx.pypa.io/), [uv](https://docs.astral.sh/uv/), [poetry](https://python-poetry.org/), or any Python package manager.
+This package is installed directly from repository source (it is not currently published on PyPI).python.org/en/latest/guides/installing-using-pip-and-virtual-environments/#install-a-package), [pipx](https://pipx.pypa.io/), [uv](https://docs.astral.sh/uv/), [poetry](https://python-poetry.org/), or any Python package manager.
 
 ```text
-$ uvx pyghidra-mcp --help
-Usage: pyghidra-mcp [OPTIONS] [INPUT_PATHS]...
+$ uvx superghidra-mcp --help
+Usage: superghidra-mcp [OPTIONS] [INPUT_PATHS]...
 
   PyGhidra Command-Line MCP server
 
@@ -634,8 +633,8 @@ Options:
                                       use streamable-http instead. [default: stdio]
   -p, --port INTEGER                  Port for HTTP-based transports. [default: 8000]
   -o, --host TEXT                     Host for HTTP-based transports. [default: 127.0.0.1]
-  --project-path PATH                 Directory for a pyghidra-mcp project or an
-                                      existing Ghidra .gpr file. [default: pyghidra_mcp_projects]
+  --project-path PATH                 Directory for a superghidra-mcp project or an
+                                      existing Ghidra .gpr file. [default: superghidra_mcp_projects]
   --project-name TEXT                 Ghidra project name. Ignored for .gpr paths.
                                       [default: my_project]
   --threaded / --no-threaded          Allow threaded analysis. [default: threaded]
@@ -671,7 +670,7 @@ Options:
 
 ### Mapping Binaries with Docker
 
-When using the Docker container, you can map a local directory containing your binaries into the container's workspace. This allows `pyghidra-mcp` to analyze your files.
+When using the Docker container, you can map a local directory containing your binaries into the container's workspace. This allows `superghidra-mcp` to analyze your files.
 
 ```bash
 # Create and populate the new directory
@@ -687,14 +686,14 @@ docker run -i --rm \
 
 ### Streamable HTTP
 
-Streamable HTTP is the recommended transport. It keeps one Ghidra process and project available to MCP hosts and `pyghidra-mcp-cli`, avoiding the startup cost of a separate process per client. It sends JSON-RPC requests over HTTP; see the [spec](https://modelcontextprotocol.io/specification/draft/basic/transports#streamable-http) for details.
+Streamable HTTP is the recommended transport. It keeps one Ghidra process and project available to MCP hosts and `superghidra-mcp-cli`, avoiding the startup cost of a separate process per client. It sends JSON-RPC requests over HTTP; see the [spec](https://modelcontextprotocol.io/specification/draft/basic/transports#streamable-http) for details.
 
 By default, the server listens on [http://127.0.0.1:8000/mcp](http://127.0.0.1:8000/mcp) for client connections. Use `--host` / `--port` or the `MCP_HOST` / `MCP_PORT` environment variables to change the bind address. _The server must be running for clients to connect to it._
 
 #### Python
 
 ```bash
-pyghidra-mcp -t streamable-http
+superghidra-mcp -t streamable-http
 ```
 
 The Python package defaults to `stdio`, so always include `--transport streamable-http` when starting the server.
@@ -702,7 +701,7 @@ The Python package defaults to `stdio`, so always include `--transport streamabl
 GUI mode uses this transport:
 
 ```bash
-pyghidra-mcp \
+superghidra-mcp \
   --gui \
   --transport streamable-http \
   --project-path /absolute/path/to/my_project.gpr
@@ -719,7 +718,7 @@ docker run -p 8000:8000 ghcr.io/yuatemycat/superghidra-mcp
 After starting the HTTP server, add it to Claude Code:
 
 ```bash
-claude mcp add --transport http pyghidra-mcp http://127.0.0.1:8000/mcp
+claude mcp add --transport http superghidra-mcp http://127.0.0.1:8000/mcp
 ```
 
 For a project-shared configuration, add this to `.mcp.json` in the project root:
@@ -727,7 +726,7 @@ For a project-shared configuration, add this to `.mcp.json` in the project root:
 ```json
 {
   "mcpServers": {
-    "pyghidra-mcp": {
+    "superghidra-mcp": {
       "type": "http",
       "url": "http://127.0.0.1:8000/mcp"
     }
@@ -742,11 +741,11 @@ For a project-shared configuration, add this to `.mcp.json` in the project root:
 After starting the HTTP server, add the following to `~/.codex/config.toml`:
 
 ```toml
-[mcp_servers.pyghidra-mcp]
+[mcp_servers.superghidra-mcp]
 url = "http://127.0.0.1:8000/mcp"
 ```
 
-Restart Codex after saving the configuration. The server name is arbitrary; `pyghidra-mcp` is the name that will appear in Codex.
+Restart Codex after saving the configuration. The server name is arbitrary; `superghidra-mcp` is the name that will appear in Codex.
 
 ### Standard Input/Output (stdio)
 
@@ -755,7 +754,7 @@ Use stdio only when an MCP host cannot use an HTTP endpoint. It starts a server 
 #### Python
 
 ```bash
-pyghidra-mcp --transport stdio
+superghidra-mcp --transport stdio
 ```
 
 Because the server communicates on standard input and output, it will appear to wait without terminal output; that is expected.
@@ -777,7 +776,7 @@ https://github.com/user-attachments/assets/3d56ea08-ed2d-471d-9ed2-556fb8ee4c95
 #### With `uvx`
 
 ```bash
-uvx mcpo -- pyghidra-mcp /bin/ls
+uvx mcpo -- superghidra-mcp /bin/ls
 ```
 
 #### With Docker
@@ -798,7 +797,7 @@ By default, the server listens on [http://127.0.0.1:8000/sse](http://127.0.0.1:8
 #### Python
 
 ```bash
-pyghidra-mcp -t sse
+superghidra-mcp -t sse
 ```
 
 By default, the Python package will run in `stdio` mode, so you will have to include `-t sse`.
@@ -823,7 +822,7 @@ This project implementation and design was inspired by these awesome projects:
 ## Contributing, community, and running from source
 
 We believe the future of reverse engineering is agentic, contextual, and scalable.  
-`pyghidra-mcp` is a step toward that future—making full Ghidra projects accessible to AI agents and automation pipelines.
+`superghidra-mcp` is a step toward that future—making full Ghidra projects accessible to AI agents and automation pipelines.
 
 We’re actively developing the project and welcome feedback, issues, and contributions.
 
@@ -844,4 +843,4 @@ This ensures consistency across the codebase and helps us maintain robust, scala
 
 ______________________________________________________________________
 
-Made with ❤️ by the [PyGhidra-MCP Team](https://github.com/yuatemycat/SuperghidraMCP)
+Made with ❤️ by the [SuperghidraMCP Team](https://github.com/yuatemycat/SuperghidraMCP)
