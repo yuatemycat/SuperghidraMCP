@@ -140,6 +140,3 @@ include = ["src"]
 extraPaths = ["src"]
 reportMissingModuleSource = false
 reportMissingImports = false
-
-[tool.uv.sources]
-superghidra = { path = "../SuperGhidra", editable = true }

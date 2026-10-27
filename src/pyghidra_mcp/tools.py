@@ -499,7 +499,11 @@ class GhidraTools:
                 sig = decompiled.getSignature()
                 if emit_compilable and code:
                     try:
+                        from pyghidra_mcp.mcp_tools import _ensure_superghidra_imported
+
+                        _ensure_superghidra_imported()
                         from superghidra.core.compilable_filter import CompilableDecompilerFilter
+
                         code = CompilableDecompilerFilter.filter(code, emit_compilable=True)
                     except Exception as e:
                         logger.debug("CompilableDecompilerFilter error: %s", e)

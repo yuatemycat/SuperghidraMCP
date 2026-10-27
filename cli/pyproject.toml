@@ -49,7 +49,6 @@ line-length = 120
 
 [tool.uv.sources]
 superghidra-mcp = { path = "..", editable = true }
-superghidra = { path = "../../SuperGhidra", editable = true }
 
 [tool.ruff.lint]
 ignore = ["E402"]
