@@ -1,6 +1,6 @@
 [project]
 name = "superghidra-mcp-cli"
-version = "0.2.7"
+version = "0.5.0"
 description = "Command-line client for superghidra-mcp server"
 authors = [
     { name = "yuatemycat", email = "344623529+yuatemycat@users.noreply.github.com" },

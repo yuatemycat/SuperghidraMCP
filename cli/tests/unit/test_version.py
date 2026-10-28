@@ -1,4 +1,7 @@
-import tomli
+try:
+    import tomllib as tomli
+except ImportError:
+    import tomli
 from click.testing import CliRunner
 
 from pyghidra_mcp_cli import __version__
