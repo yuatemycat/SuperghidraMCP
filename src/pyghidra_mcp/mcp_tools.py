@@ -142,6 +142,11 @@ def _journal(pyghidra_context: MCPContext, program_info: Any, op: str, **fields:
         logger.error("Failed to journal %s on fork %s", op, fork.fork_id, exc_info=True)
 
 
+def _check_read_only(pyghidra_context: MCPContext) -> None:
+    if getattr(pyghidra_context, "read_only", False) is True:
+        raise ValueError("Session is read-only; mutation operations are disallowed.")
+
+
 def _session_info(pyghidra_context: MCPContext) -> SessionInfo | None:
     info = forks.session_info(pyghidra_context)
     return SessionInfo(**info) if info else None
@@ -508,6 +513,7 @@ def rename_function(
 ) -> RenameResponse:
     """Rename a function."""
     pyghidra_context = _get_pyghidra_context(ctx)
+    _check_read_only(pyghidra_context)
     program_info = pyghidra_context.get_program_info(binary_name)
     tools = GhidraTools(program_info)
     result = _run_for_context(
@@ -536,6 +542,7 @@ def rename_variable(
 ) -> VariableRenameResponse:
     """Rename a parameter or local by exact name."""
     pyghidra_context = _get_pyghidra_context(ctx)
+    _check_read_only(pyghidra_context)
     program_info = pyghidra_context.get_program_info(binary_name)
     tools = GhidraTools(program_info)
     result = _run_for_context(
@@ -565,6 +572,7 @@ def set_variable_type(
 ) -> VariableTypeResponse:
     """Set a parameter or local type by exact name."""
     pyghidra_context = _get_pyghidra_context(ctx)
+    _check_read_only(pyghidra_context)
     program_info = pyghidra_context.get_program_info(binary_name)
     tools = GhidraTools(program_info)
     result = _run_for_context(
@@ -595,6 +603,7 @@ def set_function_prototype(
 ) -> FunctionPrototypeResponse:
     """Set a function prototype. Invalid input returns Ghidra's error."""
     pyghidra_context = _get_pyghidra_context(ctx)
+    _check_read_only(pyghidra_context)
     program_info = pyghidra_context.get_program_info(binary_name)
     tools = GhidraTools(program_info)
     result = _run_for_context(
@@ -624,6 +633,7 @@ def set_comment(
 ) -> CommentResponse:
     """Set a decompiler or listing comment."""
     pyghidra_context = _get_pyghidra_context(ctx)
+    _check_read_only(pyghidra_context)
     program_info = pyghidra_context.get_program_info(binary_name)
     tools = GhidraTools(program_info)
     result = _run_for_context(
@@ -647,6 +657,7 @@ def set_comment(
 def delete_project_binary(binary_name: str, ctx: Context) -> str:
     """Delete a binary from the project."""
     pyghidra_context = _get_pyghidra_context(ctx)
+    _check_read_only(pyghidra_context)
     if pyghidra_context.delete_program(binary_name):
         fork = _fork_session(pyghidra_context)
         if fork is not None:
@@ -853,16 +864,17 @@ def merge_fork(
     ctx: Context,
     dry_run: bool = False,
     on_conflict: Literal["skip", "overwrite"] = "skip",
-    auto_discard: bool = False,
+    auto_discard: bool = True,
 ) -> ForkMergeResult:
     """Replay a fork's journaled edits into this (primary) project.
 
     Edits whose target also changed here since the fork are conflicts: skipped,
     or forced with on_conflict="overwrite". Re-running only retries unresolved edits.
-    If `auto_discard=True` and all edits are resolved cleanly (`pending_ops == 0`),
+    If `auto_discard=True` (default) and all edits are resolved cleanly (`pending_ops == 0`),
     the fork directory is automatically deleted to reclaim disk storage.
     """
     pyghidra_context = _get_pyghidra_context(ctx)
+    _check_read_only(pyghidra_context)
     if _fork_session(pyghidra_context) is not None:
         raise ValueError(
             "This session is itself a fork; merge_fork must run on the primary session "
@@ -873,9 +885,7 @@ def merge_fork(
         GhidraTools,
         run=lambda fn: _run_for_context(pyghidra_context, fn),
     )
-    result = merger.merge(fork_id, dry_run=dry_run, on_conflict=on_conflict)
-    if auto_discard and not dry_run and result.get("pending_ops", 0) == 0:
-        forks.discard_fork(_forks_dir(pyghidra_context), fork_id)
+    result = merger.merge(fork_id, dry_run=dry_run, on_conflict=on_conflict, auto_discard=auto_discard)
     return ForkMergeResult(**result)
 
 
@@ -883,6 +893,7 @@ def merge_fork(
 def discard_fork(fork_id: str, ctx: Context) -> str:
     """Delete a stopped fork and its journal. Unmerged edits are lost."""
     pyghidra_context = _get_pyghidra_context(ctx)
+    _check_read_only(pyghidra_context)
     fork = _fork_session(pyghidra_context)
     if fork is not None and fork.fork_id == fork_id:
         raise ValueError("A session cannot discard the fork it is running on.")

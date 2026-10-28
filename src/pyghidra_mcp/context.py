@@ -56,6 +56,9 @@ class ProgramInfo:
         return self.ghidra_analysis_complete
 
 
+_DEFAULT_GZFS = object()
+
+
 class PyGhidraContext(IndexingMixin):
     """
     Manages a Ghidra project, including its creation, program imports, and cleanup.
@@ -74,13 +77,14 @@ class PyGhidraContext(IndexingMixin):
         no_symbols: bool = False,
         gdts: list | None = None,
         program_options: dict | None = None,
-        gzfs_path: str | Path | None = None,
+        gzfs_path: str | Path | None | object = _DEFAULT_GZFS,
         threaded: bool = True,
         max_workers: int | None = None,
         wait_for_analysis: bool = False,
         symbols_path: str | Path | None = None,
         sym_file_path: str | Path | None = None,
         fork_session: ForkSession | None = None,
+        read_only: bool = False,
     ):
         """
         Initializes a new Ghidra project context.
@@ -109,6 +113,7 @@ class PyGhidraContext(IndexingMixin):
         self.project_name = project_name
         self.project_path = Path(project_path)
         self.fork_session = fork_session
+        self.read_only = read_only
         self.project: GhidraProject = self._get_or_create_project()
         try:
             self._init_after_project_open(
@@ -139,7 +144,7 @@ class PyGhidraContext(IndexingMixin):
         no_symbols: bool,
         gdts: list | None,
         program_options: dict | None,
-        gzfs_path: str | Path | None,
+        gzfs_path: str | Path | None | object = _DEFAULT_GZFS,
         threaded: bool,
         max_workers: int | None,
         wait_for_analysis: bool,
@@ -171,8 +176,13 @@ class PyGhidraContext(IndexingMixin):
         )
         self.sym_file_path = Path(sym_file_path) if sym_file_path else None
         self.program_options = program_options
-        self.gzfs_path = Path(gzfs_path) if gzfs_path else self.pyghidra_mcp_dir / "gzfs"
-        if self.gzfs_path:
+        if gzfs_path is _DEFAULT_GZFS:
+            self.gzfs_path = self.pyghidra_mcp_dir / "gzfs"
+        elif not gzfs_path:
+            self.gzfs_path = None
+        else:
+            self.gzfs_path = Path(gzfs_path)
+        if self.gzfs_path is not None:
             self.gzfs_path.mkdir(exist_ok=True, parents=True)
 
         self.threaded = threaded
@@ -180,7 +190,7 @@ class PyGhidraContext(IndexingMixin):
         self.max_workers = max_workers if max_workers else cpu_count
 
         if not self.threaded:
-            logger.warn("--no-threaded flag forcing max_workers to 1")
+            logger.warning("--no-threaded flag forcing max_workers to 1")
             self.max_workers = 1
         self._init_indexing_state(self.pyghidra_mcp_dir, threaded=self.threaded)
         self.executor = (
@@ -200,6 +210,8 @@ class PyGhidraContext(IndexingMixin):
         """
         Saves changes to all open programs and closes the project.
         """
+        if getattr(self, "read_only", False) is True:
+            save = False
         started = time.monotonic()
         logger.info("Closing project %s (save=%s)...", self.project_name, save)
 
@@ -259,6 +271,9 @@ class PyGhidraContext(IndexingMixin):
         """
         Save changes to all open programs.
         """
+        if getattr(self, "read_only", False) is True:
+            logger.info("Project is in read-only mode; skipping save.")
+            return
         for program_info in self.programs.values():
             self.project.save(program_info.program)
 
@@ -283,20 +298,22 @@ class PyGhidraContext(IndexingMixin):
 
         if locator.exists():
             logger.info(f"Opening existing project: {self.project_name}")
-            try:
-                lock_file = locator.getProjectLockFile()
-                if lock_file is not None and lock_file.exists():
-                    raise ProjectLockedError(
-                        f"Ghidra project '{self.project_name}' in {project_dir_str} is locked by "
-                        "another process: lock file exists"
-                    )
-            except ProjectLockedError:
-                raise
-            except Exception:
-                pass
+            if not getattr(self, "read_only", False):
+                try:
+                    lock_file = locator.getProjectLockFile()
+                    if lock_file is not None and lock_file.exists():
+                        raise ProjectLockedError(
+                            f"Ghidra project '{self.project_name}' in {project_dir_str} is locked by "
+                            "another process: lock file exists"
+                        )
+                except ProjectLockedError:
+                    raise
+                except Exception:
+                    pass
 
             try:
-                return GhidraProject.openProject(project_dir_str, self.project_name, True)
+                restore = False if getattr(self, "read_only", False) else True
+                return GhidraProject.openProject(project_dir_str, self.project_name, restore)
             except LockException as e:
                 raise ProjectLockedError(
                     f"Ghidra project '{self.project_name}' in {project_dir_str} is locked by "
@@ -390,6 +407,8 @@ class PyGhidraContext(IndexingMixin):
         Returns:
             True if the program was deleted successfully, False otherwise.
         """
+        if getattr(self, "read_only", False) is True:
+            raise ValueError("Session is read-only; mutation operations are disallowed.")
         program_info = self.programs.get(program_name)
         if not program_info:
             available_progs = list(self.programs.keys())
@@ -427,6 +446,8 @@ class PyGhidraContext(IndexingMixin):
         """
         from ghidra.program.model.listing import Program
 
+        if getattr(self, "read_only", False) is True:
+            raise ValueError("Session is read-only; mutation operations are disallowed.")
         binary_path = Path(binary_path)
         if binary_path.is_dir():
             return self.import_binaries([binary_path], analyze=analyze)
@@ -508,6 +529,8 @@ class PyGhidraContext(IndexingMixin):
             binary_paths: A list of paths to the binary files or directories.
             analyze: Whether to analyze the imported binaries.
         """
+        if getattr(self, "read_only", False) is True:
+            raise ValueError("Session is read-only; mutation operations are disallowed.")
         import_plan = build_import_plan(binary_paths)
         files_to_import = [
             (candidate.path, candidate.relative_path) for candidate in import_plan.candidates
@@ -919,11 +942,49 @@ class PyGhidraContext(IndexingMixin):
         else:
             logger.info(f"Analysis already complete.. skipping {program}!")
 
-        # Save program as gzfs
+        # Save program as gzfs (with deduplication against identical existing archives)
         if self.gzfs_path is not None:
             pathname = df.pathname.replace("/", "_")
             gzf_file = self.gzfs_path / f"{pathname}.gzf"
-            self.project.saveAsPackedFile(program, File(str(gzf_file.absolute())), True)
+            hash_file = self.gzfs_path / f"{pathname}.sha256"
+            prog_hash = None
+            try:
+                meta = dict(program.getMetadata())
+                prog_hash = (
+                    meta.get("Executable SHA256")
+                    or meta.get("Executable MD5")
+                    or meta.get("SHA256")
+                    or meta.get("MD5")
+                )
+            except Exception:
+                pass
+            if not prog_hash:
+                try:
+                    exe_loc = program.getExecutablePath()
+                    if exe_loc and Path(exe_loc).is_file():
+                        import hashlib
+                        prog_hash = hashlib.sha256(Path(exe_loc).read_bytes()).hexdigest()
+                except Exception:
+                    pass
+            skip_export = False
+            if gzf_file.exists() and gzf_file.stat().st_size > 0:
+                if prog_hash and hash_file.exists():
+                    try:
+                        if hash_file.read_text(encoding="utf-8").strip() == str(prog_hash).strip():
+                            skip_export = True
+                    except OSError:
+                        pass
+                elif not prog_hash and not getattr(program, "isChanged", lambda: True)():
+                    skip_export = True
+            if skip_export:
+                logger.debug("GZF archive for %s already exists and is up-to-date; skipping.", df_or_prog.getName())
+            else:
+                self.project.saveAsPackedFile(program, File(str(gzf_file.absolute())), True)
+                if prog_hash:
+                    try:
+                        hash_file.write_text(str(prog_hash).strip(), encoding="utf-8")
+                    except OSError:
+                        pass
 
         logger.info(f"Analysis for {df_or_prog.getName()} complete")
         program_info = self.programs[df.pathname]

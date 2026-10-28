@@ -211,23 +211,36 @@ def create_project_context(
     project_spec: ProjectSpec,
     on_project_locked: str = "fork",
     fork_label: str | None = None,
+    read_only: bool = False,
+    max_forks: int = 4,
+    max_fork_disk_mb: int = 2048,
     **context_kwargs,
 ) -> PyGhidraContext:
     """Open the project, or a fork of it when another session holds the lock."""
+    # Auto-prune dead/merged forks on session initialization
+    try:
+        forks.prune_forks(project_spec.pyghidra_mcp_dir, dry_run=False)
+    except Exception as e:
+        logger.debug("Startup auto-pruning skipped or encountered: %s", e)
+
     try:
         return PyGhidraContext(
             project_name=project_spec.project_name,
             project_path=project_spec.project_directory,
             pyghidra_mcp_dir=project_spec.pyghidra_mcp_dir,
+            read_only=read_only,
             **context_kwargs,
         )
     except forks.ProjectLockedError as e:
-        if on_project_locked != "fork":
+        if read_only:
+            logger.warning("%s Running in read-only mode; starting read-only fork without mutations.", e)
+        elif on_project_locked != "fork":
             raise click.ClickException(
                 f"{e}\nShare one server between agents (--transport streamable-http), or "
                 "rerun with --on-project-locked fork to work on a mergeable fork."
             ) from None
-        logger.warning("%s Starting on a fork instead.", e)
+        else:
+            logger.warning("%s Starting on a fork instead.", e)
 
     # The lock holder may be mid-save while the project is cloned; a torn copy
     # fails to open, so retry once from a fresh clone without the seeded index.
@@ -236,9 +249,18 @@ def create_project_context(
     attempts += [(None, True), (None, False)]
     last_error: Exception | None = None
     for reused, seed_index in attempts:
-        session = reused or forks.create_fork(project_spec, fork_label, seed_index=seed_index)
+        session = reused or forks.create_fork(
+            project_spec,
+            fork_label,
+            seed_index=seed_index,
+            max_forks=max_forks,
+            max_fork_disk_mb=max_fork_disk_mb,
+        )
         if reused is not None:
-            logger.info("Resuming fork %s with unmerged edits.", session.fork_id)
+            if session.op_count > 0:
+                logger.info("Resuming fork %s with unmerged edits.", session.fork_id)
+            else:
+                logger.info("Reusing clean fork %s.", session.fork_id)
             session.mark("active")
         fork_spec = session.project_spec
         try:
@@ -247,6 +269,7 @@ def create_project_context(
                 project_path=fork_spec.project_directory,
                 pyghidra_mcp_dir=fork_spec.pyghidra_mcp_dir,
                 fork_session=session,
+                read_only=read_only,
                 **{**context_kwargs, "gzfs_path": None},
             )
         except Exception as e:
@@ -288,6 +311,9 @@ def init_pyghidra_context(
     sym_file_path: str | None,
     on_project_locked: str = "fork",
     fork_label: str | None = None,
+    read_only: bool = False,
+    max_forks: int = 4,
+    max_fork_disk_mb: int = 2048,
 ) -> MCPServer:
     bin_paths: list[str | Path] = [Path(p) for p in input_paths]
     logger.info(f"Project: {project_name}")
@@ -318,6 +344,9 @@ def init_pyghidra_context(
         ),
         on_project_locked=on_project_locked,
         fork_label=fork_label,
+        read_only=read_only,
+        max_forks=max_forks,
+        max_fork_disk_mb=max_fork_disk_mb,
         force_analysis=force_analysis,
         verbose_analysis=verbose_analysis,
         no_symbols=no_symbols,
@@ -653,6 +682,30 @@ def run_headless_server(
         "server resumes its own stopped fork if it still has unmerged edits."
     ),
 )
+@optgroup.option(
+    "--max-forks",
+    type=int,
+    default=4,
+    envvar="PYGHIDRA_MCP_MAX_FORKS",
+    show_default=True,
+    help="Maximum number of concurrent forks allowed before quota enforcement.",
+)
+@optgroup.option(
+    "--max-fork-disk-mb",
+    type=int,
+    default=2048,
+    envvar="PYGHIDRA_MCP_MAX_FORK_DISK_MB",
+    show_default=True,
+    help="Maximum total disk space (in MB) all forks may consume before quota enforcement.",
+)
+@optgroup.option(
+    "--read-only",
+    is_flag=True,
+    default=False,
+    envvar="PYGHIDRA_MCP_READ_ONLY",
+    show_default=True,
+    help="Run session in read-only mode. If project is locked, avoids cloning and disallows mutation tools.",
+)
 # --- Project Options ---
 @optgroup.group("Project Management")
 @optgroup.option(
@@ -734,6 +787,9 @@ def main(
     gui: bool,
     on_project_locked: str,
     fork_label: str | None,
+    max_forks: int,
+    max_fork_disk_mb: int,
+    read_only: bool,
     list_project_binaries: bool,
     delete_project_binary: str | None,
     sym_file_path: str | None,
@@ -810,6 +866,9 @@ def main(
         symbols_path=symbols_path,
         on_project_locked=on_project_locked.lower(),
         fork_label=fork_label,
+        read_only=read_only,
+        max_forks=max_forks,
+        max_fork_disk_mb=max_fork_disk_mb,
     )
 
     run_headless_server(mcp, transport, host=host, port=port)

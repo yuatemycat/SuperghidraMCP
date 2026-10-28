@@ -251,18 +251,72 @@ def _ignore_lock_files(_directory: str, names: list[str]) -> list[str]:
     return [name for name in names if name.endswith(_LOCK_FILE_SUFFIXES)]
 
 
+def get_fork_disk_usage_bytes(fork_dir: Path) -> int:
+    """Calculate total disk usage of a fork directory in bytes."""
+    size_bytes = 0
+    try:
+        for p in fork_dir.rglob("*"):
+            if p.is_file():
+                try:
+                    size_bytes += p.stat().st_size
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    return size_bytes
+
+
 def create_fork(
     parent: ProjectSpec,
     label: str | None = None,
     *,
     seed_index: bool = True,
+    max_forks: int = 4,
+    max_fork_disk_mb: int = 2048,
 ) -> ForkSession:
     """Clone the parent project's last saved state into a new fork directory.
 
+    Enforces fork count and disk usage quotas before cloning.
     Programs the lock holder has modified but not saved are not part of the
     clone. Merges compare against the primary's *current* values, so that
     staleness shows up as conflicts rather than silent overwrites.
     """
+    # Enforce fork quotas
+    existing = list_forks(parent.pyghidra_mcp_dir)
+    total_bytes = sum(get_fork_disk_usage_bytes(Path(f["path"])) for f in existing)
+    total_mb = total_bytes / (1024 * 1024)
+
+    if len(existing) >= max_forks or total_mb >= max_fork_disk_mb:
+        prune_forks(parent.pyghidra_mcp_dir, dry_run=False)
+        existing = list_forks(parent.pyghidra_mcp_dir)
+        total_bytes = sum(get_fork_disk_usage_bytes(Path(f["path"])) for f in existing)
+        total_mb = total_bytes / (1024 * 1024)
+
+    while len(existing) >= max_forks or total_mb >= max_fork_disk_mb:
+        dead_forks = [f for f in existing if f.get("alive") is False]
+        if not dead_forks:
+            break
+        oldest_dead = min(dead_forks, key=lambda f: f.get("created_at", ""))
+        logger.warning(
+            "Fork quota exceeded (%d forks, %.1f MB >= limit %d forks, %d MB). Discarding oldest dead fork %s.",
+            len(existing),
+            total_mb,
+            max_forks,
+            max_fork_disk_mb,
+            oldest_dead["fork_id"],
+        )
+        discard_fork(parent.pyghidra_mcp_dir, oldest_dead["fork_id"])
+        existing = list_forks(parent.pyghidra_mcp_dir)
+        total_bytes = sum(get_fork_disk_usage_bytes(Path(f["path"])) for f in existing)
+        total_mb = total_bytes / (1024 * 1024)
+
+    if len(existing) >= max_forks or total_mb >= max_fork_disk_mb:
+        raise RuntimeError(
+            f"Fork quota exceeded: {len(existing)} active fork(s) consuming {total_mb:.1f} MB "
+            f"exceed configured limits (max_forks={max_forks}, max_fork_disk_mb={max_fork_disk_mb} MB). "
+            "No stopped or dead forks available to reclaim."
+        )
+
     label = _sanitize_label(label)
     fork_id = "-".join(
         part for part in (time.strftime("%Y%m%d-%H%M%S"), label, uuid.uuid4().hex[:6]) if part
@@ -324,24 +378,51 @@ def create_fork(
     )
 
 
-def find_reusable_fork(parent: ProjectSpec, label: str | None) -> ForkSession | None:
-    """Return the newest stopped fork with ``label`` that still has unmerged edits.
-
-    This lets an agent whose server restarts pick up its own fork again instead of
-    starting from a fresh clone that lacks its earlier, not-yet-merged work.
+def find_reusable_fork(parent: ProjectSpec, label: str | None = None) -> ForkSession | None:
+    """Return a stopped fork that can be reused:
+    1. First, the newest stopped fork matching ``label`` that has unmerged edits (pending_ops > 0).
+    2. Otherwise, the newest clean stopped fork (pending_ops == 0 and alive is False).
     """
-    label = _sanitize_label(label)
-    if not label:
-        return None
-    candidates = [
+    cleaned_label = _sanitize_label(label)
+    all_forks = list_forks(parent.pyghidra_mcp_dir)
+    stopped = [info for info in all_forks if info.get("alive") is False]
+
+    # 1. First priority: stopped fork matching label with pending edits
+    if cleaned_label:
+        pending_candidates = [
+            info
+            for info in stopped
+            if info.get("label") == cleaned_label and info.get("pending_ops", 0) > 0
+        ]
+        if pending_candidates:
+            newest = max(pending_candidates, key=lambda info: info.get("created_at", ""))
+            return ForkSession.load(Path(newest["path"]))
+
+    # 2. Second priority: clean stopped fork (pending_ops == 0 and alive is False)
+    clean_candidates = [
         info
-        for info in list_forks(parent.pyghidra_mcp_dir)
-        if info["label"] == label and info["alive"] is False and info["pending_ops"] > 0
+        for info in stopped
+        if info.get("pending_ops", 0) == 0
     ]
-    if not candidates:
-        return None
-    newest = max(candidates, key=lambda info: info["created_at"])
-    return ForkSession.load(Path(newest["path"]))
+    if clean_candidates:
+        if cleaned_label:
+            same_label = [info for info in clean_candidates if info.get("label") == cleaned_label]
+            if same_label:
+                newest = max(same_label, key=lambda info: info.get("created_at", ""))
+                return ForkSession.load(Path(newest["path"]))
+            unlabeled = [info for info in clean_candidates if not info.get("label")]
+            if unlabeled:
+                newest = max(unlabeled, key=lambda info: info.get("created_at", ""))
+                session = ForkSession.load(Path(newest["path"]))
+                session.label = cleaned_label
+                return session
+        else:
+            unlabeled = [info for info in clean_candidates if not info.get("label")]
+            if unlabeled:
+                newest = max(unlabeled, key=lambda info: info.get("created_at", ""))
+                return ForkSession.load(Path(newest["path"]))
+
+    return None
 
 
 def describe_fork(fork_dir: Path) -> dict[str, Any] | None:
@@ -624,6 +705,7 @@ class ForkMerger:
         *,
         dry_run: bool = False,
         on_conflict: str = "skip",
+        auto_discard: bool = True,
     ) -> dict[str, Any]:
         if on_conflict not in {"skip", "overwrite"}:
             raise ValueError("on_conflict must be 'skip' or 'overwrite'")
@@ -661,13 +743,20 @@ class ForkMerger:
                 if counts.get("applied") or counts.get("overwritten"):
                     self.context.save()
 
+        pending_count = sum(1 for op in journal if str(op["seq"]) not in resolved)
+        if auto_discard and not dry_run and pending_count == 0:
+            try:
+                discard_fork(self.context.pyghidra_mcp_dir, fork_id)
+                logger.info("Auto-pruned merged fork %s post-merge.", fork_id)
+            except ValueError as e:
+                logger.debug("Could not auto-discard fork %s post-merge: %s", fork_id, e)
         return {
             "fork_id": fork_id,
             "dry_run": dry_run,
             "on_conflict": on_conflict,
             "counts": counts,
             "entries": entries,
-            "pending_ops": sum(1 for op in journal if str(op["seq"]) not in resolved),
+            "pending_ops": pending_count,
         }
 
     def _merge_one(self, op: dict[str, Any], *, dry_run: bool, on_conflict: str) -> _Outcome:
