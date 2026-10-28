@@ -121,7 +121,7 @@ def install_sigint_shutdown_handler() -> _SigintShutdownHandler:
 async def server_lifespan(server: MCPServer) -> AsyncIterator[MCPContext]:
     """Manage server startup and shutdown lifecycle."""
     try:
-        yield server._pyghidra_context  # type: ignore
+        yield getattr(server, '_pyghidra_context', None)  # type: ignore
     finally:
         # pyghidra_context.close()
         pass
@@ -185,6 +185,12 @@ def register_common_tools(server: MCPServer) -> None:
         server.tool()(mcp_tools.solve_global_type_lattice)
         server.tool()(mcp_tools.migrate_semantic_deltas)
         server.tool()(mcp_tools.preindex_dwarf_pdb)
+        server.tool()(mcp_tools.inspect_analysis_view)
+        server.tool()(mcp_tools.trace_native_values)
+        server.tool()(mcp_tools.decompile_all)
+        server.tool()(mcp_tools.apple_dispatch)
+        server.tool()(mcp_tools.il2cpp_recover)
+        server.tool()(mcp_tools.crate_audit)
 
 
 

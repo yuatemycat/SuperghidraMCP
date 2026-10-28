@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from .server import main
     from .tools import GhidraTools
 
-__version__ = "0.5.0"
+__version__ = "1.0.0"
 __author__ = "yuatemycat"
 
 

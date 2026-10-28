@@ -710,3 +710,87 @@ class TypeLatticeResult(BaseModel):
     iterations: int = 0
     binary_path: str = ""
     message: str = ""
+
+
+class InspectAnalysisViewResult(BaseModel):
+    status: str = "ok"
+    parent_evidence_id: str
+    facet: str
+    total_count: int
+    offset: int
+    limit: int
+    truncated: bool
+    items: list[Any] = Field(default_factory=list)
+    filter_expr: str | None = None
+    message: str = ""
+
+
+class TraceNativeValuesResult(BaseModel):
+    status: str = "ok"
+    binary_path: str
+    root_procedure: str
+    max_depth: int
+    max_nodes: int
+    node_count: int = 0
+    edge_count: int = 0
+    procedures_visited: list[str] = Field(default_factory=list)
+    omitted_ops_total: int = 0
+    omitted_edges_total: int = 0
+    is_truncated: bool = False
+    nodes: list[dict[str, Any]] = Field(default_factory=list)
+    edges: list[dict[str, Any]] = Field(default_factory=list)
+    message: str = ""
+
+
+class DecompileAllResult(BaseModel):
+    status: str = "ok"
+    target_sha256: str
+    output_directory: str
+    analysis_profile_digest: str
+    total_functions: int = 0
+    decompiled_count: int = 0
+    external_count: int = 0
+    skipped_count: int = 0
+    failed_count: int = 0
+    circuit_breaker_tripped: bool = False
+    diagnostics: str = ""
+    counts: dict[str, int] = Field(default_factory=dict)
+    message: str = ""
+
+
+class AppleDispatchResult(BaseModel):
+    status: str = "ok"
+    arch: str
+    bits: int
+    image_base: str
+    chained_fixups: dict[str, Any] = Field(default_factory=dict)
+    swift5: dict[str, Any] = Field(default_factory=dict)
+    objc: dict[str, Any] = Field(default_factory=dict)
+    counts: dict[str, int] = Field(default_factory=dict)
+    limitations: list[str] = Field(default_factory=list)
+    epistemic_status: str = "observed"
+    message: str = ""
+
+
+class Il2CppRecoverResult(BaseModel):
+    status: str = "ok"
+    is_valid: bool
+    version: int
+    assemblies: list[dict[str, Any]] = Field(default_factory=list)
+    types: list[dict[str, Any]] = Field(default_factory=list)
+    string_literals_count: int = 0
+    counts: dict[str, int] = Field(default_factory=dict)
+    limitations: list[str] = Field(default_factory=list)
+    epistemic_status: str = "observed"
+    message: str = ""
+
+
+class CrateAuditResult(BaseModel):
+    status: str = "ok"
+    binary_format: str
+    is_64bit: bool
+    rust: dict[str, Any] = Field(default_factory=dict)
+    go: dict[str, Any] = Field(default_factory=dict)
+    limitations: list[str] = Field(default_factory=list)
+    epistemic_status: str = "observed"
+    message: str = ""

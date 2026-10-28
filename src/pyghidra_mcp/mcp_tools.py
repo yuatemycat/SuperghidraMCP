@@ -34,6 +34,7 @@ from pyghidra_mcp import forks
 from pyghidra_mcp.context_protocol import MCPContext
 from pyghidra_mcp.models import (
     ApkJniCrossRefResult,
+    AppleDispatchResult,
     BinaryDiffResult,
     BinaryMatchItem,
     BytesReadResult,
@@ -44,9 +45,11 @@ from pyghidra_mcp.models import (
     ClearCacheResult,
     CodeSearchResults,
     CommentResponse,
+    CrateAuditResult,
     CrossReferenceInfos,
     DataflowQueryResult,
     DecodeCArchiveResult,
+    DecompileAllResult,
     DecompiledFunction,
     DisassembleResult,
     EmulatorMemoryVerifyResult,
@@ -66,8 +69,10 @@ from pyghidra_mcp.models import (
     GpuSeedFunctionsResult,
     GuiContextResponse,
     HibernateResult,
+    Il2CppRecoverResult,
     ImportInfos,
     ImportRequestResult,
+    InspectAnalysisViewResult,
     InspectBinaryResult,
     JniMatchItem,
     MigratedEventRecordItem,
@@ -90,6 +95,7 @@ from pyghidra_mcp.models import (
     StructInsertionItem,
     SymbolSearchResults,
     SyntheticSymbolExportResult,
+    TraceNativeValuesResult,
     TraceSerializeResult,
     TypeLatticeResult,
     UsercallCompileResult,
@@ -3060,3 +3066,347 @@ def solve_global_type_lattice(
     )
 
 
+
+
+@mcp_error_handler
+def inspect_analysis_view(
+    parent_evidence_id: str,
+    facet: str = "compilable_c",
+    offset: int = 0,
+    limit: int = 64,
+    filter_expr: str | None = None,
+    ctx: Context | None = None,
+) -> InspectAnalysisViewResult:
+    """Queries and pages retained analysis evidence facets from the persistent L2 cache.
+
+    Args:
+        parent_evidence_id: Identifier of the parent evidence item.
+        facet: Facet to query (compilable_c, raw_c, assembly, pcode_ops, def_use_edges,
+            incoming_xrefs, outgoing_calls, struct_fields, jump_tables).
+        offset: Zero-based item offset.
+        limit: Max items to return (1-500).
+        filter_expr: Optional regex or substring filter.
+        ctx: MCP context.
+    """
+    _ensure_superghidra_imported()
+    from superghidra.core.views import InspectAnalysisViewRequest, inspect_analysis_view as _inspect_view
+
+    cache_instance = None
+    if ctx is not None:
+        try:
+            pyghidra_context = _get_pyghidra_context(ctx)
+            cache_instance = getattr(pyghidra_context, "l2_cache", None) or getattr(pyghidra_context, "cache", None)
+        except Exception:
+            pass
+
+    req = InspectAnalysisViewRequest(
+        parent_evidence_id=parent_evidence_id,
+        facet=facet,  # type: ignore
+        offset=offset,
+        limit=limit,
+        filter_expr=filter_expr,
+    )
+    resp = _inspect_view(req, cache_instance=cache_instance)
+    return InspectAnalysisViewResult(
+        parent_evidence_id=resp.parent_evidence_id,
+        facet=resp.facet,
+        total_count=resp.total_count,
+        offset=resp.offset,
+        limit=resp.limit,
+        truncated=resp.truncated,
+        items=resp.items,
+        filter_expr=resp.filter_expr,
+        message=(
+            f"Retrieved {len(resp.items)} {resp.facet} items for '{resp.parent_evidence_id}' "
+            f"(offset {resp.offset}, total {resp.total_count}, truncated={resp.truncated})."
+        ),
+    )
+
+
+@mcp_error_handler
+def trace_native_values(
+    binary_path: str,
+    procedure: str,
+    max_depth: int = 3,
+    max_nodes: int = 2500,
+    ctx: Context | None = None,
+) -> TraceNativeValuesResult:
+    """Traces high-P-code def-use graphs and propagates values across inter-procedural call sites.
+
+    Args:
+        binary_path: Path to the target executable or shared library.
+        procedure: Name or entry point address of the root procedure.
+        max_depth: Maximum cross-call depth to trace.
+        max_nodes: Maximum nodes to accumulate before truncating.
+        ctx: MCP context.
+    """
+    _ensure_superghidra_imported()
+    from superghidra.lifters.trace_values import trace_native_values as _trace_values
+
+    p = _resolve_safe_path(binary_path, must_exist=True, for_write=False)
+    report = _trace_values(
+        str(p),
+        procedure=procedure,
+        max_depth=max_depth,
+        max_nodes=max_nodes,
+    )
+    d = report.to_dict()
+    return TraceNativeValuesResult(
+        binary_path=str(p),
+        root_procedure=procedure,
+        max_depth=report.max_depth,
+        max_nodes=report.max_nodes,
+        node_count=d.get("node_count", len(report.nodes)),
+        edge_count=d.get("edge_count", len(report.edges)),
+        procedures_visited=report.procedures_visited,
+        omitted_ops_total=report.omitted_ops_total,
+        omitted_edges_total=report.omitted_edges_total,
+        is_truncated=report.is_truncated,
+        nodes=d.get("nodes", []),
+        edges=d.get("edges", []),
+        message=(
+            f"Traced {d.get('node_count', len(report.nodes))} nodes and "
+            f"{d.get('edge_count', len(report.edges))} edges across "
+            f"{len(report.procedures_visited)} procedures (truncated={report.is_truncated})."
+        ),
+    )
+
+
+
+def _resolve_safe_dir_path(
+    path: str | Path,
+    must_exist: bool = False,
+    for_write: bool = True,
+) -> Path:
+    """Validates safe directory paths against system directory traversal."""
+    if not path or not str(path).strip():
+        raise ValueError("Path must not be empty")
+
+    p = Path(path).resolve()
+    allowed_roots_env = os.environ.get("SUPERGHIDRA_ALLOWED_ROOTS")
+    if allowed_roots_env:
+        roots = [Path(r.strip()).resolve() for r in allowed_roots_env.split(os.pathsep) if r.strip()]
+        if roots:
+            is_under = any(
+                (p == r or r in p.parents or (os.name == "nt" and str(p).lower().startswith(str(r).lower())))
+                for r in roots
+            )
+            if not is_under:
+                raise ValueError(f"Path '{p}' is not within SUPERGHIDRA_ALLOWED_ROOTS: {allowed_roots_env}")
+
+    if for_write:
+        raw_str = str(path).lower().replace("/", "\\")
+        if any(raw_str.startswith(prefix) for prefix in (r"c:\windows", r"c:\winnt", r"c:\program files")):
+            raise ValueError(f"Writing into protected system directory is forbidden: '{path}'")
+
+        sys_dirs: list[Path] = []
+        if os.name == "nt":
+            for env_var in ("SystemRoot", "windir", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"):
+                val = os.environ.get(env_var)
+                if val:
+                    sys_dirs.append(Path(val).resolve())
+            sys_dirs.extend([
+                Path(r"C:\Windows").resolve(),
+                Path(r"C:\Program Files").resolve(),
+                Path(r"C:\Program Files (x86)").resolve(),
+            ])
+        else:
+            sys_dirs.extend([
+                Path("/etc").resolve(),
+                Path("/usr").resolve(),
+                Path("/bin").resolve(),
+                Path("/sbin").resolve(),
+                Path("/System").resolve(),
+                Path("/Library").resolve(),
+            ])
+
+        for sd in sys_dirs:
+            if str(p).lower().startswith(str(sd).lower()):
+                raise ValueError(f"Writing into protected system directory is forbidden: '{p}'")
+
+        if p.exists() and not p.is_dir():
+            raise ValueError(f"Target path for directory write exists and is a file: '{p}'")
+
+    if must_exist:
+        if not p.exists() or not p.is_dir():
+            raise ValueError(f"Directory does not exist: '{p}'")
+
+    return p
+
+
+@mcp_error_handler
+def decompile_all(
+    binary_path: str,
+    output_directory: str,
+    filter_compilable: bool = True,
+    verify_z3: bool = False,
+    arch: str = "x86_64",
+    concurrency: int = 4,
+    resume: bool = True,
+    ctx: Context | None = None,
+) -> DecompileAllResult:
+    """Executes crash-resumable bulk whole-binary decompilation to structured C files.
+
+    Args:
+        binary_path: Target binary file path.
+        output_directory: Destination directory for decompiled files and export manifests.
+        filter_compilable: Whether to filter out uncompilable artifacts.
+        verify_z3: Whether to run formal Z3 SMT verification on lifted decompiled ASTs.
+        arch: Target machine architecture.
+        concurrency: Concurrency worker limit.
+        resume: Whether to resume from previous checkpoint if available.
+        ctx: MCP context.
+    """
+    _ensure_superghidra_imported()
+    from superghidra.core.bulk_decompile import BulkDecompiler
+
+    bin_p = _resolve_safe_path(binary_path, must_exist=True, for_write=False)
+    out_p = _resolve_safe_dir_path(output_directory, must_exist=False, for_write=True)
+
+    decompiler = BulkDecompiler(
+        binary_path=bin_p,
+        output_directory=out_p,
+        filter_compilable=filter_compilable,
+        verify_z3=verify_z3,
+        arch=arch,
+        resume=resume,
+    )
+    manifest = decompiler.run()
+    d = manifest.to_dict()
+    counts = d.get("counts", {})
+    return DecompileAllResult(
+        target_sha256=manifest.target_sha256,
+        output_directory=manifest.output_directory,
+        analysis_profile_digest=manifest.analysis_profile_digest,
+        total_functions=manifest.total_functions,
+        decompiled_count=manifest.decompiled_count,
+        external_count=manifest.external_count,
+        skipped_count=manifest.skipped_count,
+        failed_count=manifest.failed_count,
+        circuit_breaker_tripped=manifest.circuit_breaker_tripped,
+        diagnostics=manifest.diagnostics,
+        counts=counts,
+        message=(
+            f"Bulk decompilation complete: {manifest.decompiled_count}/{manifest.total_functions} "
+            f"functions decompiled ({manifest.failed_count} failed, "
+            f"circuit_breaker={manifest.circuit_breaker_tripped})."
+        ),
+    )
+
+
+@mcp_error_handler
+def apple_dispatch(
+    binary_path: str,
+    arch: str = "arm64e",
+    max_input_bytes: int = 67108864,
+    ctx: Context | None = None,
+) -> AppleDispatchResult:
+    """Parses Apple Mach-O binaries, decoding dyld chained fixups, Swift 5, and Objective-C metadata.
+
+    Args:
+        binary_path: Path to Mach-O executable or dylib.
+        arch: Architecture slice to extract from Universal FAT binaries.
+        max_input_bytes: Maximum byte limit for binary ingestion.
+        ctx: MCP context.
+    """
+    _ensure_superghidra_imported()
+    from superghidra.formats.apple_dispatch import parse_apple_dispatch
+
+    p = _resolve_safe_path(binary_path, must_exist=True, for_write=False)
+    report = parse_apple_dispatch(
+        str(p),
+        arch=arch,
+        max_input_bytes=max_input_bytes,
+    )
+    d = report.to_dict()
+    return AppleDispatchResult(
+        arch=report.arch,
+        bits=report.bits,
+        image_base=d["image_base"],
+        chained_fixups=d.get("chained_fixups", {}),
+        swift5=d.get("swift5", {}),
+        objc=d.get("objc", {}),
+        counts=report.counts,
+        limitations=report.limitations,
+        epistemic_status=report.epistemic_status,
+        message=(
+            f"Apple Mach-O ({report.arch}, {report.bits}-bit): "
+            f"{report.counts.get('objc_classes', 0)} ObjC classes, "
+            f"{report.counts.get('swift5_types', 0)} Swift 5 types, "
+            f"{report.counts.get('chained_fixups', 0)} chained fixups."
+        ),
+    )
+
+
+@mcp_error_handler
+def il2cpp_recover(
+    global_metadata_dat_path: str,
+    binary_path: str | None = None,
+    ctx: Context | None = None,
+) -> Il2CppRecoverResult:
+    """Recovers Unity IL2CPP assemblies, type definitions, method signatures, and field layouts.
+
+    Args:
+        global_metadata_dat_path: Path to Unity global-metadata.dat file.
+        binary_path: Optional path to paired native binary (libil2cpp.so / GameAssembly.dll).
+        ctx: MCP context.
+    """
+    _ensure_superghidra_imported()
+    from superghidra.formats.il2cpp_metadata import recover_il2cpp_metadata
+
+    meta_p = _resolve_safe_path(global_metadata_dat_path, must_exist=True, for_write=False)
+    bin_p = _resolve_safe_path(binary_path, must_exist=True, for_write=False) if binary_path else None
+
+    report = recover_il2cpp_metadata(
+        str(meta_p),
+        binary_path_or_bytes=str(bin_p) if bin_p else None,
+    )
+    d = report.to_dict()
+    return Il2CppRecoverResult(
+        is_valid=report.is_valid,
+        version=report.version,
+        assemblies=d.get("assemblies", []),
+        types=d.get("types", []),
+        string_literals_count=d.get("string_literals_count", 0),
+        counts=report.counts,
+        limitations=report.limitations,
+        epistemic_status=report.epistemic_status,
+        message=(
+            f"Unity IL2CPP metadata v{report.version}: {report.counts.get('assemblies', 0)} assemblies, "
+            f"{report.counts.get('types', 0)} types, {report.counts.get('methods', 0)} methods."
+        ),
+    )
+
+
+@mcp_error_handler
+def crate_audit(
+    binary_path: str,
+    ctx: Context | None = None,
+) -> CrateAuditResult:
+    """Audits compiled Rust and Go binaries to recover dependency graphs, toolchains, and build info.
+
+    Args:
+        binary_path: Target binary executable or library.
+        ctx: MCP context.
+    """
+    _ensure_superghidra_imported()
+    from superghidra.formats.rust_go_metadata import audit_crates_and_go
+
+    bin_p = _resolve_safe_path(binary_path, must_exist=True, for_write=False)
+    report = audit_crates_and_go(str(bin_p))
+    d = report.to_dict()
+    crates_cnt = len(d.get("rust", {}).get("crates", []))
+    go_ver = d.get("go", {}).get("go_version") or "unknown"
+    return CrateAuditResult(
+        binary_format=report.binary_format,
+        is_64bit=report.is_64bit,
+        rust=d.get("rust", {}),
+        go=d.get("go", {}),
+        limitations=report.limitations,
+        epistemic_status=report.epistemic_status,
+        message=(
+            f"{report.binary_format} binary ({'64-bit' if report.is_64bit else '32-bit'}): "
+            f"Rust ({crates_cnt} crates, rustc={d.get('rust', {}).get('rustc_commit') or 'none'}), "
+            f"Go (version={go_ver}, module={(d.get('go', {}).get('main_module') or {}).get('path') or 'none'})."
+        ),
+    )
