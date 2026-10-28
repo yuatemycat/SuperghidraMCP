@@ -157,6 +157,9 @@ def register_common_tools(server: MCPServer) -> None:
     server.tool()(mcp_tools.list_forks)
     server.tool()(mcp_tools.merge_fork)
     server.tool()(mcp_tools.discard_fork)
+    server.tool()(mcp_tools.resolve_conflict)
+    server.tool()(mcp_tools.sync_fork)
+    server.tool()(mcp_tools.get_session_info)
     server.tool()(mcp_tools.rva_translate)
     server.tool()(mcp_tools.gpu_adrp_scan)
     server.tool()(mcp_tools.gpu_seed_functions)
@@ -196,12 +199,34 @@ def register_gui_tools(server: MCPServer) -> None:
 register_common_tools(mcp)
 
 
+register_tools = register_common_tools
+
+
+def server_instructions(context: object) -> str:
+    """Return instructions for initialize prompt, mentioning resolve_conflict when a fork has conflicts."""
+    instructions = forks.server_instructions(context)
+    fork = getattr(context, "fork_session", None)
+    if fork is not None:
+        fork_dir = getattr(fork, "fork_dir", None)
+        if fork_dir is not None and isinstance(fork_dir, Path):
+            merge_state = forks.load_merge_state(fork_dir)
+            conflicts = merge_state.get("conflicts", {})
+            if conflicts and "resolve_conflict" not in instructions:
+                count = len(conflicts) if isinstance(conflicts, (dict, list)) else 1
+                conflict_msg = (
+                    f"This fork has {count} unresolved conflicts from merge_fork. "
+                    "Call resolve_conflict() from the primary or sync_fork() to refresh."
+                )
+                instructions = f"{instructions}\n\n{conflict_msg}"
+    return instructions
+
+
 def _set_server_instructions(mcp: MCPServer, context: object) -> None:
     """Tell clients at initialize time whether this session is a fork."""
     try:
         lowlevel = getattr(mcp, '_lowlevel_server', None)
         if lowlevel is not None:
-            lowlevel.instructions = forks.server_instructions(context)
+            lowlevel.instructions = server_instructions(context)
     except Exception:
         logger.debug("Could not set server instructions", exc_info=True)
 

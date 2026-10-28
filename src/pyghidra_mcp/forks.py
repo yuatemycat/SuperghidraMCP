@@ -51,7 +51,9 @@ MERGE_STATE_FILE = "merge_state.json"
 _LOCK_FILE_SUFFIXES = (".lock", ".lock~", ".ulock")
 
 # Merge outcomes that are final: the entry is not replayed by later merges.
-RESOLVED_STATUSES = frozenset({"applied", "already_applied", "overwritten", "queued", "ignored"})
+RESOLVED_STATUSES = frozenset(
+    {"applied", "already_applied", "overwritten", "queued", "ignored", "discarded", "resolved_both", "combined"}
+)
 
 _merge_lock = threading.Lock()
 
@@ -163,7 +165,19 @@ def load_merge_state(fork_dir: Path) -> dict[str, Any]:
     state = _read_json(fork_dir / MERGE_STATE_FILE)
     state.setdefault("resolved", {})
     state.setdefault("merges", [])
+    state.setdefault("conflicts", {})
+    state.setdefault("conflicts", {})
     return state
+
+
+def save_merge_state(fork_dir: Path, state: dict[str, Any]) -> None:
+    state.setdefault("conflicts", {})
+    _write_json(fork_dir / MERGE_STATE_FILE, state)
+
+
+def save_merge_state(fork_dir: Path, state: dict[str, Any]) -> None:
+    state.setdefault("conflicts", {})
+    _write_json(fork_dir / MERGE_STATE_FILE, state)
 
 
 def forks_root(pyghidra_mcp_dir: Path) -> Path:
@@ -245,6 +259,9 @@ class ForkSession:
         meta["host"] = socket.gethostname()
         meta[f"{status}_at"] = _now_iso()
         _write_json(self.fork_dir / FORK_META_FILE, meta)
+
+    def sync(self) -> dict[str, Any]:
+        return sync_fork(self.parent_pyghidra_mcp_dir, self.fork_id)
 
 
 def _ignore_lock_files(_directory: str, names: list[str]) -> list[str]:
@@ -430,7 +447,8 @@ def describe_fork(fork_dir: Path) -> dict[str, Any] | None:
     if not meta.get("fork_id"):
         return None
     journal = read_journal(fork_dir)
-    resolved = load_merge_state(fork_dir)["resolved"]
+    merge_state = load_merge_state(fork_dir)
+    resolved = merge_state["resolved"]
     resolved_count = sum(1 for entry in journal if str(entry["seq"]) in resolved)
 
     status = meta.get("status", "active")
@@ -452,6 +470,7 @@ def describe_fork(fork_dir: Path) -> dict[str, Any] | None:
         "journal_ops": len(journal),
         "resolved_ops": resolved_count,
         "pending_ops": len(journal) - resolved_count,
+        "conflicts": list(merge_state.get("conflicts", {}).values()),
         "path": str(fork_dir),
     }
 
@@ -575,6 +594,7 @@ class _Outcome:
     status: str
     target: str
     detail: str | None = None
+    primary_value: Any = None
 
 
 def _reconcile(
@@ -589,51 +609,122 @@ def _reconcile(
 ) -> _Outcome:
     """Three-way decision for one edit: fork base (old), fork result (new), primary now."""
     if _same(current, new):
-        return _Outcome("already_applied", target)
+        return _Outcome("already_applied", target, primary_value=current)
     if _same(current, old):
         if dry_run:
-            return _Outcome("would_apply", target, f"{old!r} -> {new!r}")
+            return _Outcome("would_apply", target, f"{old!r} -> {new!r}", primary_value=current)
         apply()
-        return _Outcome("applied", target, f"{old!r} -> {new!r}")
+        return _Outcome("applied", target, f"{old!r} -> {new!r}", primary_value=current)
     detail = f"primary has {current!r}; fork changed {old!r} -> {new!r}"
     if on_conflict == "overwrite":
         if dry_run:
-            return _Outcome("would_overwrite", target, detail)
+            return _Outcome("would_overwrite", target, detail, primary_value=current)
         apply()
-        return _Outcome("overwritten", target, detail)
-    return _Outcome("conflict", target, detail)
+        return _Outcome("overwritten", target, detail, primary_value=current)
+    return _Outcome("conflict", target, detail, primary_value=current)
 
 
-def _merge_rename_function(tools, op, dry_run, on_conflict) -> _Outcome:
+def _merge_rename_function(
+    tools: Any,
+    op: dict[str, Any],
+    dry_run: bool,
+    on_conflict: str,
+    *,
+    preserve_alias: bool = False,
+    fork_id: str = "",
+    **_kwargs: Any,
+) -> _Outcome:
     func = tools.find_function(op["address"])
-    return _reconcile(
-        target=f"function @ {op['address']}",
-        current=str(func.getName()),
-        old=op["old"],
-        new=op["new"],
-        apply=lambda: tools.rename_function(op["address"], op["new"]),
-        dry_run=dry_run,
-        on_conflict=on_conflict,
-    )
+    current = str(func.getName())
+    target = f"function @ {op['address']}"
+    old = op["old"]
+    new = op["new"]
+
+    if _same(current, new):
+        return _Outcome("already_applied", target, primary_value=current)
+    if _same(current, old):
+        if dry_run:
+            return _Outcome("would_apply", target, f"{old!r} -> {new!r}", primary_value=current)
+        tools.rename_function(op["address"], new)
+        return _Outcome("applied", target, f"{old!r} -> {new!r}", primary_value=current)
+
+    detail = f"primary has {current!r}; fork changed {old!r} -> {new!r}"
+    if preserve_alias:
+        losing_name = current if on_conflict == "overwrite" else new
+        if losing_name:
+            alias_str = (
+                f"[Alternative name from fork {fork_id}]: {losing_name}"
+                if (losing_name == new and fork_id)
+                else f"[Alternative name]: {losing_name}"
+            )
+            existing = tools.get_comment(op["address"], "plate")
+            combined_plate = f"{existing}\n\n{alias_str}" if existing else alias_str
+            if not dry_run:
+                tools.set_comment(op["address"], combined_plate, "plate")
+            detail += f" (preserved alias {losing_name!r})"
+
+    if on_conflict == "overwrite":
+        if dry_run:
+            return _Outcome("would_overwrite", target, detail, primary_value=current)
+        tools.rename_function(op["address"], new)
+        return _Outcome("overwritten", target, detail, primary_value=current)
+
+    return _Outcome("conflict", target, detail, primary_value=current)
 
 
-def _merge_rename_variable(tools, op, dry_run, on_conflict) -> _Outcome:
+def _merge_rename_variable(
+    tools: Any,
+    op: dict[str, Any],
+    dry_run: bool,
+    on_conflict: str,
+    *,
+    preserve_alias: bool = False,
+    fork_id: str = "",
+    **_kwargs: Any,
+) -> _Outcome:
     _func, _kind, variable = tools.find_variable(
         op["function_address"], storage=op.get("storage"), names=(op["old"], op["new"])
     )
     current = str(variable.getName())
-    return _reconcile(
-        target=f"variable {op.get('storage') or op['old']} in {op['function_address']}",
-        current=current,
-        old=op["old"],
-        new=op["new"],
-        apply=lambda: tools.rename_variable(op["function_address"], current, op["new"]),
-        dry_run=dry_run,
-        on_conflict=on_conflict,
-    )
+    target = f"variable {op.get('storage') or op['old']} in {op['function_address']}"
+    old = op["old"]
+    new = op["new"]
+
+    if _same(current, new):
+        return _Outcome("already_applied", target, primary_value=current)
+    if _same(current, old):
+        if dry_run:
+            return _Outcome("would_apply", target, f"{old!r} -> {new!r}", primary_value=current)
+        tools.rename_variable(op["function_address"], current, new)
+        return _Outcome("applied", target, f"{old!r} -> {new!r}", primary_value=current)
+
+    detail = f"primary has {current!r}; fork changed {old!r} -> {new!r}"
+    if preserve_alias:
+        losing_name = current if on_conflict == "overwrite" else new
+        if losing_name:
+            alias_str = (
+                f"[Alternative variable name from fork {fork_id}]: {losing_name}"
+                if (losing_name == new and fork_id)
+                else f"[Alternative variable name]: {losing_name}"
+            )
+            existing = tools.get_comment(op["function_address"], "plate")
+            combined_plate = f"{existing}\n\n{alias_str}" if existing else alias_str
+            if not dry_run:
+                tools.set_comment(op["function_address"], combined_plate, "plate")
+            detail += f" (preserved alias {losing_name!r})"
+
+    if on_conflict == "overwrite":
+        if dry_run:
+            return _Outcome("would_overwrite", target, detail, primary_value=current)
+        tools.rename_variable(op["function_address"], current, new)
+        return _Outcome("overwritten", target, detail, primary_value=current)
+
+    return _Outcome("conflict", target, detail, primary_value=current)
 
 
-def _merge_set_variable_type(tools, op, dry_run, on_conflict) -> _Outcome:
+def _merge_set_variable_type(
+    tools: Any, op: dict[str, Any], dry_run: bool, on_conflict: str, **_kwargs: Any
+) -> _Outcome:
     _func, _kind, variable = tools.find_variable(
         op["function_address"], storage=op.get("storage"), names=(op["variable_name"],)
     )
@@ -649,7 +740,9 @@ def _merge_set_variable_type(tools, op, dry_run, on_conflict) -> _Outcome:
     )
 
 
-def _merge_set_function_prototype(tools, op, dry_run, on_conflict) -> _Outcome:
+def _merge_set_function_prototype(
+    tools: Any, op: dict[str, Any], dry_run: bool, on_conflict: str, **_kwargs: Any
+) -> _Outcome:
     func = tools.find_function(op["address"])
     return _reconcile(
         target=f"prototype @ {op['address']}",
@@ -662,16 +755,49 @@ def _merge_set_function_prototype(tools, op, dry_run, on_conflict) -> _Outcome:
     )
 
 
-def _merge_set_comment(tools, op, dry_run, on_conflict) -> _Outcome:
-    return _reconcile(
-        target=f"{op['comment_type']} comment @ {op['address']}",
-        current=tools.get_comment(op["address"], op["comment_type"]),
-        old=op.get("old"),
-        new=op["new"],
-        apply=lambda: tools.set_comment(op["address"], op["new"], op["comment_type"]),
-        dry_run=dry_run,
-        on_conflict=on_conflict,
-    )
+def _merge_set_comment(
+    tools: Any,
+    op: dict[str, Any],
+    dry_run: bool,
+    on_conflict: str,
+    *,
+    combine_comments: bool = False,
+    fork_id: str = "",
+    **_kwargs: Any,
+) -> _Outcome:
+    current = tools.get_comment(op["address"], op["comment_type"])
+    target = f"{op['comment_type']} comment @ {op['address']}"
+    old = op.get("old")
+    new = op["new"]
+
+    if _same(current, new):
+        return _Outcome("already_applied", target, primary_value=current)
+    if _same(current, old):
+        if dry_run:
+            return _Outcome("would_apply", target, f"{old!r} -> {new!r}", primary_value=current)
+        tools.set_comment(op["address"], new, op["comment_type"])
+        return _Outcome("applied", target, f"{old!r} -> {new!r}", primary_value=current)
+
+    detail = f"primary has {current!r}; fork changed {old!r} -> {new!r}"
+
+    if on_conflict == "overwrite":
+        if dry_run:
+            return _Outcome("would_overwrite", target, detail, primary_value=current)
+        tools.set_comment(op["address"], new, op["comment_type"])
+        return _Outcome("overwritten", target, detail, primary_value=current)
+
+    if combine_comments or on_conflict == "combine":
+        if current:
+            combined = f"{current}\n\n[{fork_id}]: {new}" if fork_id else f"{current}\n\n{new}"
+        else:
+            combined = f"[{fork_id}]: {new}" if fork_id else new
+        combine_detail = f"combined comments: {current!r} + {new!r}"
+        if dry_run:
+            return _Outcome("would_apply", target, combine_detail, primary_value=current)
+        tools.set_comment(op["address"], combined, op["comment_type"])
+        return _Outcome("applied", target, combine_detail, primary_value=current)
+
+    return _Outcome("conflict", target, detail, primary_value=current)
 
 
 _PROGRAM_EDIT_HANDLERS = {
@@ -706,32 +832,156 @@ class ForkMerger:
         dry_run: bool = False,
         on_conflict: str = "skip",
         auto_discard: bool = True,
+        combine_comments: bool = False,
+        preserve_alias: bool = False,
+        atomic_by_function: bool = False,
     ) -> dict[str, Any]:
-        if on_conflict not in {"skip", "overwrite"}:
-            raise ValueError("on_conflict must be 'skip' or 'overwrite'")
+        if on_conflict not in {"skip", "overwrite", "combine"}:
+            raise ValueError("on_conflict must be 'skip', 'overwrite', or 'combine'")
 
         fork_dir = resolve_fork_dir(self.context.pyghidra_mcp_dir, fork_id)
         with _merge_lock:
             state = load_merge_state(fork_dir)
             resolved: dict[str, str] = state["resolved"]
+            conflicts: dict[str, dict[str, Any]] = state.setdefault("conflicts", {})
             journal = read_journal(fork_dir)
             entries = []
-            for op in journal:
-                if str(op["seq"]) in resolved:
-                    continue
-                outcome = self._merge_one(op, dry_run=dry_run, on_conflict=on_conflict)
-                entries.append(
-                    {
-                        "seq": op["seq"],
-                        "op": op["op"],
-                        "binary": op.get("binary", ""),
-                        "target": outcome.target,
-                        "status": outcome.status,
-                        "detail": outcome.detail,
-                    }
-                )
-                if not dry_run and outcome.status in RESOLVED_STATUSES:
-                    resolved[str(op["seq"])] = outcome.status
+
+            # Gather pending operations
+            pending_ops = [op for op in journal if str(op["seq"]) not in resolved]
+
+            if atomic_by_function:
+                # Group edits by canonical function address: op.get("address") or op.get("function_address")
+                # Group key includes binary so separate binaries with identical addresses don't collide.
+                groups: dict[Any, list[dict[str, Any]]] = {}
+                for op in pending_ops:
+                    fn_addr = op.get("function_address") or op.get("address")
+                    key = (op.get("binary", ""), fn_addr) if fn_addr is not None else f"__seq_{op['seq']}"
+                    groups.setdefault(key, []).append(op)
+
+                for group_key, group_ops in groups.items():
+                    has_conflict = False
+                    test_outcomes: dict[int, _Outcome] = {}
+                    if on_conflict != "overwrite":
+                        for op in group_ops:
+                            test_out = self._merge_one(
+                                op,
+                                dry_run=True,
+                                on_conflict=on_conflict,
+                                combine_comments=combine_comments,
+                                preserve_alias=preserve_alias,
+                                fork_id=fork_id,
+                            )
+                            test_outcomes[op["seq"]] = test_out
+                            if test_out.status == "conflict":
+                                has_conflict = True
+
+                    if has_conflict:
+                        # Hold back all edits for that function in that merge pass so the function is never left
+                        # in a half-updated inconsistent state.
+                        fn_addr = group_ops[0].get("function_address") or group_ops[0].get("address") or ""
+                        for op in group_ops:
+                            test_out = test_outcomes[op["seq"]]
+                            if test_out.status == "conflict":
+                                entries.append(
+                                    {
+                                        "seq": op["seq"],
+                                        "op": op["op"],
+                                        "binary": op.get("binary", ""),
+                                        "target": test_out.target,
+                                        "status": "conflict",
+                                        "detail": test_out.detail,
+                                    }
+                                )
+                                if not dry_run:
+                                    conflicts[str(op["seq"])] = {
+                                        **op,
+                                        "seq": op["seq"],
+                                        "op": op["op"],
+                                        "primary_value": test_out.primary_value,
+                                        "fork_value": op.get("new"),
+                                        "target": test_out.target,
+                                        "created_at": _now_iso(),
+                                    }
+                            else:
+                                entries.append(
+                                    {
+                                        "seq": op["seq"],
+                                        "op": op["op"],
+                                        "binary": op.get("binary", ""),
+                                        "target": test_out.target,
+                                        "status": "skipped",
+                                        "detail": f"held back: conflict in function {fn_addr}",
+                                    }
+                                )
+                    else:
+                        for op in group_ops:
+                            outcome = self._merge_one(
+                                op,
+                                dry_run=dry_run,
+                                on_conflict=on_conflict,
+                                combine_comments=combine_comments,
+                                preserve_alias=preserve_alias,
+                                fork_id=fork_id,
+                            )
+                            entries.append(
+                                {
+                                    "seq": op["seq"],
+                                    "op": op["op"],
+                                    "binary": op.get("binary", ""),
+                                    "target": outcome.target,
+                                    "status": outcome.status,
+                                    "detail": outcome.detail,
+                                }
+                            )
+                            if not dry_run:
+                                if outcome.status == "conflict":
+                                    conflicts[str(op["seq"])] = {
+                                        **op,
+                                        "seq": op["seq"],
+                                        "op": op["op"],
+                                        "primary_value": outcome.primary_value,
+                                        "fork_value": op.get("new"),
+                                        "target": outcome.target,
+                                        "created_at": _now_iso(),
+                                    }
+                                elif outcome.status in RESOLVED_STATUSES:
+                                    resolved[str(op["seq"])] = outcome.status
+                                    conflicts.pop(str(op["seq"]), None)
+            else:
+                for op in pending_ops:
+                    outcome = self._merge_one(
+                        op,
+                        dry_run=dry_run,
+                        on_conflict=on_conflict,
+                        combine_comments=combine_comments,
+                        preserve_alias=preserve_alias,
+                        fork_id=fork_id,
+                    )
+                    entries.append(
+                        {
+                            "seq": op["seq"],
+                            "op": op["op"],
+                            "binary": op.get("binary", ""),
+                            "target": outcome.target,
+                            "status": outcome.status,
+                            "detail": outcome.detail,
+                        }
+                    )
+                    if not dry_run:
+                        if outcome.status == "conflict":
+                            conflicts[str(op["seq"])] = {
+                                **op,
+                                "seq": op["seq"],
+                                "op": op["op"],
+                                "primary_value": outcome.primary_value,
+                                "fork_value": op.get("new"),
+                                "target": outcome.target,
+                                "created_at": _now_iso(),
+                            }
+                        elif outcome.status in RESOLVED_STATUSES:
+                            resolved[str(op["seq"])] = outcome.status
+                            conflicts.pop(str(op["seq"]), None)
 
             counts: dict[str, int] = {}
             for entry in entries:
@@ -739,8 +989,8 @@ class ForkMerger:
 
             if not dry_run:
                 state["merges"] = [*state["merges"], {"at": _now_iso(), "counts": counts}][-20:]
-                _write_json(fork_dir / MERGE_STATE_FILE, state)
-                if counts.get("applied") or counts.get("overwritten"):
+                save_merge_state(fork_dir, state)
+                if counts.get("applied") or counts.get("overwritten") or counts.get("combined"):
                     self.context.save()
 
         pending_count = sum(1 for op in journal if str(op["seq"]) not in resolved)
@@ -759,7 +1009,31 @@ class ForkMerger:
             "pending_ops": pending_count,
         }
 
-    def _merge_one(self, op: dict[str, Any], *, dry_run: bool, on_conflict: str) -> _Outcome:
+    def resolve_conflict(
+        self,
+        fork_id: str,
+        seq: int,
+        keep: str = "primary",
+    ) -> dict[str, Any]:
+        """Resolve an active conflict using this merger's context and tools."""
+        return resolve_conflict(
+            self.context.pyghidra_mcp_dir,
+            fork_id,
+            seq,
+            keep=keep,
+            merger=self,
+        )
+
+    def _merge_one(
+        self,
+        op: dict[str, Any],
+        *,
+        dry_run: bool,
+        on_conflict: str,
+        combine_comments: bool = False,
+        preserve_alias: bool = False,
+        fork_id: str = "",
+    ) -> _Outcome:
         kind = op.get("op")
         if kind == "delete_project_binary":
             return _Outcome(
@@ -782,7 +1056,17 @@ class ForkMerger:
 
         tools = self.tools_factory(program_info)
         try:
-            return self.run(lambda: handler(tools, op, dry_run, on_conflict))
+            return self.run(
+                lambda: handler(
+                    tools,
+                    op,
+                    dry_run,
+                    on_conflict,
+                    combine_comments=combine_comments,
+                    preserve_alias=preserve_alias,
+                    fork_id=fork_id,
+                )
+            )
         except Exception as e:
             return _Outcome("failed", op.get("address") or op.get("function_address") or "", str(e))
 
@@ -806,18 +1090,35 @@ def session_info(context: Any) -> dict[str, Any] | None:
     """Describe whether ``context`` is a fork or the primary, for tool responses."""
     fork = getattr(context, "fork_session", None)
     if isinstance(fork, ForkSession):
-        return {
+        fork_dir = fork.fork_dir
+        merge_state = load_merge_state(fork_dir)
+        journal = read_journal(fork_dir)
+        resolved_count = sum(1 for entry in journal if str(entry.get("seq")) in merge_state.get("resolved", {}))
+        conflicts_val = merge_state.get("conflicts", {})
+        conflicts = list(conflicts_val.values()) if isinstance(conflicts_val, dict) else list(conflicts_val)
+        hint = (
+            "Another session holds the main project, so this one works on a private "
+            "fork. Edits are journaled for the primary session to merge with merge_fork; "
+            "changes made there after the fork are not visible here."
+        )
+        res = {
             "role": "fork",
             "project": str(fork.project_spec.gpr_path),
             "fork_id": fork.fork_id,
             "parent_project": str(fork.parent_project),
             "journal_ops": fork.op_count,
-            "hint": (
-                "Another session holds the main project, so this one works on a private "
-                "fork. Edits are journaled for the primary session to merge with merge_fork; "
-                "changes made there after the fork are not visible here."
-            ),
+            "resolved_ops": resolved_count,
+            "conflicts": conflicts,
+            "hint": hint,
         }
+        if conflicts:
+            advice = (
+                f"This fork has {len(conflicts)} unresolved conflicts from merge_fork. "
+                "Call resolve_conflict() from the primary or sync_fork() to refresh."
+            )
+            res["advice"] = advice
+            res["hint"] = f"{hint} {advice}"
+        return res
 
     pyghidra_mcp_dir = getattr(context, "pyghidra_mcp_dir", None)
     if not isinstance(pyghidra_mcp_dir, Path):
@@ -853,3 +1154,273 @@ def server_instructions(context: Any) -> str:
     if info and info["role"] == "fork":
         return f"{base}\n\nTHIS SESSION IS FORK {info['fork_id']}. {info['hint']}"
     return base
+
+
+def resolve_conflict(
+    target_or_dir: Path | Any,
+    fork_id: str,
+    seq: int,
+    keep: str = "primary",
+    *,
+    context: Any = None,
+    merger: ForkMerger | None = None,
+    tools: Any = None,
+) -> dict[str, Any]:
+    """Resolve an edit conflict between primary and fork.
+
+    Args:
+        target_or_dir: pyghidra_mcp_dir (Path) or a context object possessing it.
+        fork_id: ID of the fork holding the conflict.
+        seq: Sequence number of the conflicting edit.
+        keep: 'primary' (keep primary value, discard fork edit),
+              'fork' (replay and apply fork edit to primary), or
+              'both' (combine comments or set alternative name alias comment).
+        context: Optional primary context for mutating the Ghidra project.
+        merger: Optional ForkMerger instance.
+        tools: Optional tools instance or factory.
+
+    Returns:
+        Outcome dict with resolution details.
+    """
+    if keep not in {"primary", "fork", "both"}:
+        raise ValueError(f"keep must be 'primary', 'fork', or 'both', got {keep!r}")
+
+    if hasattr(target_or_dir, "pyghidra_mcp_dir"):
+        context = context or target_or_dir
+        pyghidra_mcp_dir = target_or_dir.pyghidra_mcp_dir
+    else:
+        pyghidra_mcp_dir = Path(target_or_dir)
+
+    fork_dir = resolve_fork_dir(pyghidra_mcp_dir, fork_id)
+    with _merge_lock:
+        state = load_merge_state(fork_dir)
+        resolved = state["resolved"]
+        conflicts = state.setdefault("conflicts", {})
+        journal = read_journal(fork_dir)
+
+        op = next((entry for entry in journal if entry["seq"] == seq), None)
+        if op is None:
+            raise ValueError(f"Operation with seq={seq} not found in journal for fork '{fork_id}'")
+
+        status_val: str
+        target_val = op.get("address") or op.get("function_address") or op.get("binary") or ""
+        detail_val: str | None = None
+
+        if keep == "primary":
+            status_val = "discarded"
+            detail_val = f"Discarded fork edit seq {seq}; kept primary value"
+            resolved[str(seq)] = status_val
+            conflicts.pop(str(seq), None)
+
+        elif keep == "fork":
+            if merger is not None:
+                merger_outcome = merger._merge_one(
+                    op, dry_run=False, on_conflict="overwrite", fork_id=fork_id
+                )
+                status_val = merger_outcome.status if merger_outcome.status in RESOLVED_STATUSES else "applied"
+                target_val = merger_outcome.target
+                detail_val = merger_outcome.detail
+                if hasattr(merger.context, "save"):
+                    merger.context.save()
+            elif context is not None:
+                program_info = context.get_program_info(op["binary"])
+                if tools is None:
+                    try:
+                        from pyghidra_mcp.tools import GhidraTools
+
+                        active_tools = GhidraTools(program_info)
+                    except Exception:
+                        raise ValueError("Could not instantiate GhidraTools for context")
+                else:
+                    active_tools = tools(program_info) if callable(tools) else tools
+                handler = _PROGRAM_EDIT_HANDLERS.get(str(op.get("op")))
+                if handler is None:
+                    raise ValueError(f"Unsupported journal op '{op.get('op')}'")
+                h_out = handler(active_tools, op, False, "overwrite", fork_id=fork_id)
+                status_val = h_out.status if h_out.status in RESOLVED_STATUSES else "applied"
+                target_val = h_out.target
+                detail_val = h_out.detail
+                if hasattr(context, "save"):
+                    context.save()
+            elif tools is not None:
+                handler = _PROGRAM_EDIT_HANDLERS.get(str(op.get("op")))
+                if handler is None:
+                    raise ValueError(f"Unsupported journal op '{op.get('op')}'")
+                h_out = handler(tools, op, False, "overwrite", fork_id=fork_id)
+                status_val = h_out.status if h_out.status in RESOLVED_STATUSES else "applied"
+                target_val = h_out.target
+                detail_val = h_out.detail
+            else:
+                raise ValueError("A context, merger, or tools instance is required to apply fork edit to primary")
+
+            resolved[str(seq)] = status_val
+            conflicts.pop(str(seq), None)
+
+        elif keep == "both":
+            if merger is not None:
+                program_info = merger.context.get_program_info(op["binary"])
+                active_tools = merger.tools_factory(program_info)
+                runner = merger.run
+                save_ctx = merger.context
+            elif context is not None:
+                program_info = context.get_program_info(op["binary"])
+                if tools is None:
+                    try:
+                        from pyghidra_mcp.tools import GhidraTools
+
+                        active_tools = GhidraTools(program_info)
+                    except Exception:
+                        raise ValueError("Could not instantiate GhidraTools for context")
+                else:
+                    active_tools = tools(program_info) if callable(tools) else tools
+                runner = lambda fn: fn()
+                save_ctx = context
+            elif tools is not None:
+                active_tools = tools
+                runner = lambda fn: fn()
+                save_ctx = None
+            else:
+                raise ValueError("A context, merger, or tools instance is required for keep='both'")
+
+            op_kind = op.get("op")
+            if op_kind == "set_comment":
+                addr = op["address"]
+                c_type = op["comment_type"]
+                current_comment = active_tools.get_comment(addr, c_type)
+                new_comment = op["new"]
+                if current_comment:
+                    combined = f"{current_comment}\n\n[{fork_id}]: {new_comment}"
+                else:
+                    combined = f"[{fork_id}]: {new_comment}"
+                runner(lambda: active_tools.set_comment(addr, combined, c_type))
+                target_val = f"{c_type} comment @ {addr}"
+                detail_val = f"Combined comments: {current_comment!r} and {new_comment!r}"
+            elif op_kind in ("rename_function", "rename_variable"):
+                func_addr = op.get("address") if op_kind == "rename_function" else (op.get("function_address") or op.get("address"))
+                new_name = op["new"]
+                existing_plate = active_tools.get_comment(func_addr, "plate")
+                alias_text = f"[Alternative name from fork {fork_id}]: {new_name}"
+                combined_plate = f"{existing_plate}\n\n{alias_text}" if existing_plate else alias_text
+                runner(lambda: active_tools.set_comment(func_addr, combined_plate, "plate"))
+                target_val = f"{op_kind} @ {func_addr}"
+                detail_val = f"Kept primary name; preserved fork alias {new_name!r} in plate comment"
+            else:
+                raise ValueError(f"keep='both' is only supported for comments and renames, not '{op_kind}'")
+
+            if save_ctx is not None and hasattr(save_ctx, "save"):
+                save_ctx.save()
+
+            status_val = "applied"
+            resolved[str(seq)] = status_val
+            conflicts.pop(str(seq), None)
+
+        save_merge_state(fork_dir, state)
+
+        return {
+            "fork_id": fork_id,
+            "seq": seq,
+            "keep": keep,
+            "status": status_val,
+            "target": target_val,
+            "detail": detail_val,
+        }
+
+
+def sync_fork(target_or_dir: Path | Any, fork_id: str) -> dict[str, Any]:
+    """Reconcile and synchronize a fork by marking resolved entries and returning updated primary state."""
+    if hasattr(target_or_dir, "pyghidra_mcp_dir"):
+        pyghidra_mcp_dir = target_or_dir.pyghidra_mcp_dir
+    else:
+        pyghidra_mcp_dir = Path(target_or_dir)
+
+    fork_dir = resolve_fork_dir(pyghidra_mcp_dir, fork_id)
+    with _merge_lock:
+        state = load_merge_state(fork_dir)
+        journal = read_journal(fork_dir)
+        resolved = state.get("resolved", {})
+        conflicts = state.get("conflicts", {})
+
+        resolved_entries = []
+        pending_entries = []
+        for op in journal:
+            s_seq = str(op["seq"])
+            if s_seq in resolved:
+                resolved_entries.append({
+                    "seq": op["seq"],
+                    "op": op["op"],
+                    "status": resolved[s_seq],
+                    "binary": op.get("binary", ""),
+                    "target": op.get("address") or op.get("function_address") or "",
+                })
+            else:
+                pending_entries.append({
+                    "seq": op["seq"],
+                    "op": op["op"],
+                    "binary": op.get("binary", ""),
+                    "target": op.get("address") or op.get("function_address") or "",
+                    "in_conflict": s_seq in conflicts,
+                    "conflict_detail": conflicts.get(s_seq),
+                })
+
+        return {
+            "fork_id": fork_id,
+            "synced_at": _now_iso(),
+            "total_ops": len(journal),
+            "resolved_ops": len(resolved_entries),
+            "pending_ops": len(pending_entries),
+            "resolved": resolved,
+            "conflicts": list(conflicts.values()),
+            "merges": state.get("merges", []),
+            "resolved_entries": resolved_entries,
+            "pending_entries": pending_entries,
+        }
+
+
+def merge_fork(
+    target_or_context: Any,
+    fork_id: str,
+    *,
+    tools_factory: Callable[[Any], Any] | None = None,
+    dry_run: bool = False,
+    on_conflict: str = "skip",
+    auto_discard: bool = True,
+    combine_comments: bool = False,
+    preserve_alias: bool = False,
+    atomic_by_function: bool = False,
+    run: Callable[[Callable[[], Any]], Any] = lambda fn: fn(),
+) -> dict[str, Any]:
+    """Top-level helper to replay a fork's edits into the primary project."""
+    if hasattr(target_or_context, "pyghidra_mcp_dir") and hasattr(target_or_context, "get_program_info"):
+        context = target_or_context
+        if tools_factory is None:
+            try:
+                from pyghidra_mcp.tools import GhidraTools
+
+                tools_factory = GhidraTools
+            except Exception:
+                tools_factory = lambda p: None
+        merger = ForkMerger(context, tools_factory=tools_factory, run=run)
+        return merger.merge(
+            fork_id,
+            dry_run=dry_run,
+            on_conflict=on_conflict,
+            auto_discard=auto_discard,
+            combine_comments=combine_comments,
+            preserve_alias=preserve_alias,
+            atomic_by_function=atomic_by_function,
+        )
+    else:
+        mcp_dir = Path(getattr(target_or_context, "pyghidra_mcp_dir", target_or_context))
+        from types import SimpleNamespace
+
+        dummy_context = SimpleNamespace(pyghidra_mcp_dir=mcp_dir, save=lambda: None)
+        merger = ForkMerger(dummy_context, tools_factory=tools_factory or (lambda p: None), run=run)
+        return merger.merge(
+            fork_id,
+            dry_run=dry_run,
+            on_conflict=on_conflict,
+            auto_discard=auto_discard,
+            combine_comments=combine_comments,
+            preserve_alias=preserve_alias,
+            atomic_by_function=atomic_by_function,
+        )

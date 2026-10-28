@@ -42,6 +42,9 @@ class SessionInfo(BaseModel):
     journal_ops: int | None = Field(None, description="edits journaled by this fork")
     pending_fork_ops: int | None = Field(None, description="unmerged edits across all forks")
     hint: str | None = None
+    conflicts: list[dict[str, Any]] | None = Field(None, description="active merge conflicts")
+    resolved_ops: int | None = Field(None, description="resolved edits for this fork")
+    advice: str | None = Field(None, description="actionable conflict advice")
 
 
 class ProgramInfos(BaseModel):
@@ -277,6 +280,7 @@ class ForkInfo(BaseModel):
     resolved_ops: int
     pending_ops: int
     path: str
+    conflicts: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ForkList(BaseModel):

@@ -11,8 +11,28 @@ from unittest.mock import Mock
 import click.testing
 import pytest
 from mcp import ClientSession
-from mcp.client._memory import InMemoryTransport
-from mcp.server.mcpserver import MCPServer
+try:
+    from mcp.client._memory import InMemoryTransport
+except ImportError:
+    from contextlib import asynccontextmanager
+    import anyio
+    from mcp.shared.memory import create_client_server_memory_streams
+
+    @asynccontextmanager
+    async def InMemoryTransport(server):
+        async with create_client_server_memory_streams() as (client_streams, server_streams):
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(
+                    lambda: server._lowlevel_server.run(
+                        server_streams[0], server_streams[1], server._lowlevel_server.create_initialization_options()
+                    )
+                )
+                yield client_streams
+                tg.cancel_scope.cancel()
+try:
+    from mcp.server.mcpserver import MCPServer
+except ImportError:
+    from mcp.server.fastmcp import FastMCP as MCPServer
 
 import pyghidra_mcp.server as server
 from pyghidra_mcp.indexing_mixin import IndexingMixin
@@ -47,6 +67,9 @@ async def test_common_tools_register_with_mcp_v2():
         "list_forks",
         "list_imports",
         "merge_fork",
+        "resolve_conflict",
+        "sync_fork",
+        "get_session_info",
         "migrate_struct_shifts",
         "neural_decompile_skin",
         "list_project_binaries",

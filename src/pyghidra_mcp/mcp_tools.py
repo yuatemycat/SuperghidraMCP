@@ -105,7 +105,9 @@ CALLGRAPH_TIMEOUT_GRACE_SECONDS = 15.0
 
 def _get_pyghidra_context(ctx: Context) -> MCPContext:
     """Narrow the SDK's default dictionary lifespan type to our shared context."""
-    return cast(MCPContext, ctx.request_context.lifespan_context)
+    if hasattr(ctx, "request_context") and hasattr(ctx.request_context, "lifespan_context"):
+        return cast(MCPContext, ctx.request_context.lifespan_context)
+    return cast(MCPContext, ctx)
 
 
 def _require_gui_context(ctx: Context):
@@ -142,9 +144,16 @@ def _journal(pyghidra_context: MCPContext, program_info: Any, op: str, **fields:
         logger.error("Failed to journal %s on fork %s", op, fork.fork_id, exc_info=True)
 
 
-def _check_read_only(pyghidra_context: MCPContext) -> None:
-    if getattr(pyghidra_context, "read_only", False) is True:
-        raise ValueError("Session is read-only; mutation operations are disallowed.")
+def _check_read_only(pyghidra_context: Any, op: str | None = None) -> None:
+    target = pyghidra_context.request_context.lifespan_context if hasattr(pyghidra_context, "request_context") else pyghidra_context
+    if getattr(target, "read_only", False) is True:
+        msg = f"Session is read-only; {op} disallowed." if op else "Session is read-only; mutation operations are disallowed."
+        raise ValueError(msg)
+    return
+
+
+
+
 
 
 def _session_info(pyghidra_context: MCPContext) -> SessionInfo | None:
@@ -921,6 +930,92 @@ def prune_forks(
         include_unmerged=include_unmerged,
     )
     return ForkPruneResult(**result)
+
+
+@mcp_error_handler
+def resolve_conflict(
+    ctx: Context,
+    fork_id: str,
+    seq: int,
+    keep: str = "primary",
+) -> dict[str, Any]:
+    """Resolve a single conflicting edit from a fork. 'keep' can be 'primary' (keep primary value, discard fork edit), 'fork' (apply fork edit over primary), or 'both' (combine comments or preserve fork's rename as a function alias comment)."""
+    if keep not in ("primary", "fork", "both"):
+        raise ValueError("keep must be 'primary', 'fork', or 'both'")
+    _check_read_only(ctx, "resolve_conflict")
+    pyghidra_context = _get_pyghidra_context(ctx)
+    if _fork_session(pyghidra_context) is not None:
+        raise ValueError(
+            "This session is itself a fork; resolve_conflict must run on the primary session "
+            "that holds the main project."
+        )
+    return forks.resolve_conflict(
+        _forks_dir(pyghidra_context),
+        fork_id,
+        seq,
+        keep=keep,
+        context=pyghidra_context,
+    )
+
+
+@mcp_error_handler
+def sync_fork(ctx: Context, fork_id: str | None = None) -> dict[str, Any]:
+    """Synchronize a fork's merge state with the primary project. Reports resolved edits and active conflicts to the fork agent."""
+    pyghidra_context = _get_pyghidra_context(ctx)
+    target_fork_id = fork_id
+    fork = _fork_session(pyghidra_context)
+    if target_fork_id is None:
+        if fork is not None:
+            target_fork_id = fork.fork_id
+        else:
+            raise ValueError("fork_id must be provided when running on a primary session")
+    return forks.sync_fork(_forks_dir(pyghidra_context), target_fork_id)
+
+
+@mcp_error_handler
+def get_session_info(ctx: Context) -> dict[str, Any]:
+    """Get information about the current session (role, project, fork details, conflicts)."""
+    pyghidra_context = _get_pyghidra_context(ctx)
+    fork = _fork_session(pyghidra_context)
+    if fork is not None:
+        fork_dir = fork.fork_dir
+        merge_state = forks.load_merge_state(fork_dir)
+        journal = forks.read_journal(fork_dir)
+        resolved_map = merge_state.get("resolved", {})
+        resolved_ops = sum(1 for entry in journal if str(entry.get("seq")) in resolved_map)
+        conflicts_raw = merge_state.get("conflicts", {})
+        if isinstance(conflicts_raw, dict):
+            conflicts = list(conflicts_raw.values())
+        elif isinstance(conflicts_raw, list):
+            conflicts = conflicts_raw
+        else:
+            conflicts = []
+
+        base_info = forks.session_info(pyghidra_context) or {}
+        result = dict(base_info)
+        result["role"] = "fork"
+        result["fork_id"] = fork.fork_id
+        result["project"] = str(fork.project_spec.gpr_path)
+        result["parent_project"] = str(fork.parent_project)
+        result["journal_ops"] = fork.op_count
+        result["resolved_ops"] = resolved_ops
+        result["conflicts"] = conflicts
+
+        if conflicts:
+            advice = (
+                f"This fork has {len(conflicts)} unresolved conflicts from merge_fork. "
+                "Call resolve_conflict() from the primary or sync_fork() to refresh."
+            )
+            result["advice"] = advice
+            if result.get("hint"):
+                if advice not in result["hint"]:
+                    result["hint"] = f"{result['hint']} {advice}"
+            else:
+                result["hint"] = advice
+        return result
+
+    base_info = forks.session_info(pyghidra_context) or {}
+    return dict(base_info)
 
 
 # SuperGhidra Native MCP Tools
