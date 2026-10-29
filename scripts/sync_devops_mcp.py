@@ -21,9 +21,7 @@ def sync_package_and_schemas() -> None:
             shutil.copy2(src_file, DEVOPS_PKG / src_file.name)
 
     DEVOPS_PTH.write_text(
-        "E:\\02_Projects\\pyghidra-mcp\\src\n"
-        "E:\\02_Projects\\SuperGhidra\n"
-        "E:\\02_Projects\n",
+        "E:\\02_Projects\\pyghidra-mcp\\src\nE:\\02_Projects\\SuperGhidra\nE:\\02_Projects\n",
         encoding="ascii",
     )
 

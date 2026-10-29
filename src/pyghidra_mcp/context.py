@@ -174,7 +174,7 @@ class PyGhidraContext(IndexingMixin):
         self.program_options = program_options
         if gzfs_path is _DEFAULT_GZFS:
             self.gzfs_path = self.pyghidra_mcp_dir / "gzfs"
-        elif isinstance(gzfs_path, (str, Path)):
+        elif isinstance(gzfs_path, (str, Path)) and str(gzfs_path).strip():
             self.gzfs_path = Path(gzfs_path)
         else:
             self.gzfs_path = None

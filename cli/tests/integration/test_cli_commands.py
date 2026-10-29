@@ -31,8 +31,7 @@ def ghidra_env():
         env["GHIDRA_INSTALL_DIR"] = "/ghidra"
         return env
     pytest.skip(
-        "GHIDRA installation not found. Set GHIDRA_INSTALL_DIR to a valid Ghidra install, "
-        "or ensure /ghidra exists."
+        "GHIDRA installation not found. Set GHIDRA_INSTALL_DIR to a valid Ghidra install, or ensure /ghidra exists."
     )
 
 
@@ -112,10 +111,7 @@ def streamable_server(test_binary, test_dir, ghidra_env, server_port):
 
     if proc.poll() is not None:
         out, err = proc.communicate(timeout=5)
-        raise RuntimeError(
-            f"pyghidra-mcp exited early with code {proc.returncode}.\n"
-            f"STDOUT:\n{out}\nSTDERR:\n{err}"
-        )
+        raise RuntimeError(f"pyghidra-mcp exited early with code {proc.returncode}.\nSTDOUT:\n{out}\nSTDERR:\n{err}")
 
     async def wait_for_server(timeout=240):
         async with aiohttp.ClientSession() as session:
@@ -236,9 +232,7 @@ def binary_name(client, streamable_server):
             # If no test binary found, use the first available binary
             if programs:
                 return programs[0].get("name", "")
-            raise ValueError(
-                f"No binaries found. Available: {[p.get('name', '') for p in programs]}"
-            )
+            raise ValueError(f"No binaries found. Available: {[p.get('name', '') for p in programs]}")
 
     return asyncio.run(_get_binary_name())
 
@@ -302,10 +296,7 @@ async def test_search_code(client, binary_name, func_prefix):
         )
         assert "results" in result
         assert len(result["results"]) > 0
-        assert (
-            name_one in result["results"][0]["function_name"]
-            or result["results"][0]["function_name"]
-        )
+        assert name_one in result["results"][0]["function_name"] or result["results"][0]["function_name"]
 
 
 @pytest.mark.asyncio

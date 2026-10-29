@@ -16,6 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       id-token: write
+      contents: write
     defaults:
       run:
         working-directory: ./cli
@@ -45,6 +46,12 @@ jobs:
         run: |
           echo "📂 Contents of source distribution archive:"
           tar -tf dist/*.tar.gz
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: cli/dist/*
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1

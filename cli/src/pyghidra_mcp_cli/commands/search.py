@@ -28,13 +28,9 @@ def search() -> None:
 @click.argument("query")
 @click.option("-o", "--offset", type=int, default=0, help="Offset for pagination.")
 @click.option("-l", "--limit", type=int, default=25, help="Maximum results to return.")
-@click.option(
-    "-f", "--functions-only", is_flag=True, default=False, help="Search only function symbols."
-)
+@click.option("-f", "--functions-only", is_flag=True, default=False, help="Search only function symbols.")
 @click.pass_context
-def symbols(
-    ctx: click.Context, binary_name: str, query: str, offset: int, limit: int, functions_only: bool
-) -> None:
+def symbols(ctx: click.Context, binary_name: str, query: str, offset: int, limit: int, functions_only: bool) -> None:
     """Search for symbols by name in a binary."""
 
     client = PyGhidraMcpClient(

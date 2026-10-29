@@ -53,9 +53,7 @@ def handle_noisy_mcp_errors(error_msg: str) -> bool:
                 return True
 
     # If we see connection-related patterns in the noisy error, show connection message
-    if any(
-        pattern in error_msg.lower() for pattern in ["connection", "connect", "refused", "failed"]
-    ):
+    if any(pattern in error_msg.lower() for pattern in ["connection", "connect", "refused", "failed"]):
         show_connection_error()
         return True
 

@@ -30,6 +30,14 @@ class FakeTools:
     def __init__(self, state):
         self.state = state
 
+    def get_function_containing(self, address):
+        if address in self.state["functions"]:
+            return self.find_function(address)
+        fn_addr = self.state.get("containing", {}).get(address)
+        if fn_addr in self.state["functions"]:
+            return self.find_function(fn_addr)
+        return None
+
     def find_function(self, address):
         if address not in self.state["functions"]:
             raise ValueError(f"Function or symbol '{address}' not found.")
@@ -38,6 +46,7 @@ class FakeTools:
             getName=lambda: fn["name"],
             getSignature=lambda: fn["signature"],
             getComment=lambda: fn.get("comment"),
+            getEntryPoint=lambda: address,
         )
 
     def rename_function(self, address, new_name):
@@ -412,3 +421,31 @@ def test_sync_fork_reports_reconciled_state(conflict_setup):
     session_sync = fork.sync()
     assert session_sync["fork_id"] == sync_result["fork_id"]
     assert session_sync["resolved_ops"] == sync_result["resolved_ops"]
+
+
+def test_atomic_by_function_groups_instruction_comment_with_enclosing_function(conflict_setup):
+    _parent, fork, state, _primary, merger = conflict_setup
+    # Set up containing map: address 1024 is inside function 1000
+    state["containing"] = {"1024": "1000"}
+    state["variables"]["1000"][0]["name"] = "different_name"
+
+    # Op 1: variable rename in 1000 (conflicts!)
+    fork.record(
+        "rename_variable",
+        BIN,
+        function_address="1000",
+        storage="Stack[-0x10]:4",
+        old="local_10",
+        new="count",
+    )
+    # Op 2: instruction comment at 1024 (NO function_address recorded)
+    fork.record("set_comment", BIN, address="1024", comment_type="eol", old=None, new="loop counter check")
+
+    res = merger.merge(fork.fork_id, atomic_by_function=True)
+
+    statuses = {e["seq"]: e["status"] for e in res["entries"]}
+    assert statuses[1] == "conflict"
+    # Op 2 should be held back because 1024 is resolved to function 1000, which has a conflict!
+    assert statuses[2] == "skipped"
+    assert "held back: conflict in function 1000" in res["entries"][1]["detail"]
+    assert ("1024", "eol") not in state["comments"]

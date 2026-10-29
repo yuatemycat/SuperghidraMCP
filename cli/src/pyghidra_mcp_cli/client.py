@@ -114,12 +114,10 @@ class PyGhidraMcpClient:
             error_msg = str(e)
             if any(x in error_msg for x in ["ConnectError", "connection", "ConnectionRefused"]):
                 raise ServerNotRunningError(
-                    f"Cannot connect to pyghidra-mcp server at {url}\n\n"
-                    f"{get_server_start_message()}"
+                    f"Cannot connect to pyghidra-mcp server at {url}\n\n{get_server_start_message()}"
                 ) from e
             raise ServerNotRunningError(
-                f"Cannot connect to pyghidra-mcp server at {url}: {e}\n\n"
-                f"{get_server_start_message()}"
+                f"Cannot connect to pyghidra-mcp server at {url}: {e}\n\n{get_server_start_message()}"
             ) from e
 
         self._transport_cm = transport_gen
@@ -168,8 +166,7 @@ class PyGhidraMcpClient:
                     except (json.JSONDecodeError, KeyError):
                         pass
                 raise BinaryNotFoundError(
-                    "Binary not found. "
-                    "Run 'pyghidra-mcp-cli list binaries' to see available binaries."
+                    "Binary not found. Run 'pyghidra-mcp-cli list binaries' to see available binaries."
                 )
             return structured
 
@@ -196,9 +193,7 @@ class PyGhidraMcpClient:
         result = await self._session.call_tool("list_open_programs", {})
         return self._extract_result(result)
 
-    async def open_program_in_gui(
-        self, binary_name: str, new_window: bool = True
-    ) -> dict[str, Any]:
+    async def open_program_in_gui(self, binary_name: str, new_window: bool = True) -> dict[str, Any]:
         """Open a binary in the Ghidra GUI."""
         if not self._connected:
             raise ClientError("Not connected")
@@ -315,9 +310,7 @@ class PyGhidraMcpClient:
         )
         return self._extract_result(result)
 
-    async def search_strings(
-        self, binary_name: str, query: str, limit: int = 100
-    ) -> dict[str, Any]:
+    async def search_strings(self, binary_name: str, query: str, limit: int = 100) -> dict[str, Any]:
         """Search for strings in the binary."""
         if not self._connected:
             raise ClientError("Not connected")
@@ -495,9 +488,7 @@ class PyGhidraMcpClient:
         )
         return self._extract_result(result)
 
-    async def rename_function(
-        self, binary_name: str, function_name_or_address: str, new_name: str
-    ) -> dict[str, Any]:
+    async def rename_function(self, binary_name: str, function_name_or_address: str, new_name: str) -> dict[str, Any]:
         """Rename a function."""
         if not self._connected:
             raise ClientError("Not connected")

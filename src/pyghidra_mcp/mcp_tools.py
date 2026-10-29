@@ -681,6 +681,7 @@ def set_comment(
         program_info,
         "set_comment",
         address=result["address"],
+        function_address=result.get("function_address"),
         comment_type=result["comment_type"],
         old=result.get("old_comment"),
         new=result["comment"],

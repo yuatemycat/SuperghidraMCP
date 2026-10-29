@@ -28,6 +28,23 @@ def _stub_ghidra(monkeypatch, get_front_end_tool, run_later=None):
     monkeypatch.setitem(sys.modules, "ghidra.util.exception", exception_module)
 
 
+def _has_ghidra_install() -> bool:
+    try:
+        from pyghidra.launcher import PyGhidraLauncher
+
+        PyGhidraLauncher()
+        return True
+    except Exception:
+        return False
+
+
+_requires_ghidra = pytest.mark.skipif(
+    not _has_ghidra_install(),
+    reason="Ghidra installation required for GuiPyGhidraMcpLauncher tests",
+)
+
+
+@_requires_ghidra
 def test_request_shutdown_closes_frontend_tool(monkeypatch):
     front_end_tool = Mock()
     swing_calls = []
@@ -45,12 +62,14 @@ def test_request_shutdown_closes_frontend_tool(monkeypatch):
     front_end_tool.close.assert_called_once_with()
 
 
+@_requires_ghidra
 def test_launcher_accepts_user_agreement_vmarg():
     launcher = GuiPyGhidraMcpLauncher(Path("/tmp/project.gpr"))
 
     assert "-DUSER_AGREEMENT=ACCEPT" in launcher.vm_args
 
 
+@_requires_ghidra
 def test_request_shutdown_is_idempotent(monkeypatch):
     front_end_tool = Mock()
     _stub_ghidra(monkeypatch, lambda: front_end_tool)
@@ -62,6 +81,7 @@ def test_request_shutdown_is_idempotent(monkeypatch):
     front_end_tool.close.assert_called_once_with()
 
 
+@_requires_ghidra
 def test_front_end_tool_treats_assert_exception_as_not_ready(monkeypatch):
     """AppInfo asserts instead of returning null until the front end exists."""
 
@@ -75,6 +95,7 @@ def test_front_end_tool_treats_assert_exception_as_not_ready(monkeypatch):
     assert launcher._front_end_tool() is None
 
 
+@_requires_ghidra
 def test_wait_for_front_end_returns_once_the_tool_appears(monkeypatch):
     front_end_tool = Mock()
     calls = []
@@ -92,6 +113,7 @@ def test_wait_for_front_end_returns_once_the_tool_appears(monkeypatch):
     assert launcher.wait_for_front_end(timeout=5.0) is True
 
 
+@_requires_ghidra
 def test_wait_for_front_end_gives_up_when_the_gui_never_starts(monkeypatch):
     def raise_not_running():
         raise _FakeAssertError("Cannot use AppInfo without a Front End running")
@@ -103,6 +125,7 @@ def test_wait_for_front_end_gives_up_when_the_gui_never_starts(monkeypatch):
     assert launcher.wait_for_front_end(timeout=0.5) is False
 
 
+@_requires_ghidra
 def test_wait_for_front_end_stops_when_the_gui_is_already_exiting(monkeypatch):
     _stub_ghidra(monkeypatch, Mock())
 
@@ -112,6 +135,7 @@ def test_wait_for_front_end_stops_when_the_gui_is_already_exiting(monkeypatch):
     assert launcher.wait_for_front_end(timeout=5.0) is False
 
 
+@_requires_ghidra
 def test_request_shutdown_without_a_front_end_does_not_raise(monkeypatch):
     def raise_not_running():
         raise _FakeAssertError("Cannot use AppInfo without a Front End running")
@@ -122,6 +146,7 @@ def test_request_shutdown_without_a_front_end_does_not_raise(monkeypatch):
     launcher.request_shutdown()  # must not propagate out of the Swing callback
 
 
+@_requires_ghidra
 def test_interrupt_releases_the_gui_event_loop():
     """A console-thread interrupt has to end the loop the GUI otherwise owns."""
     launcher = GuiPyGhidraMcpLauncher(Path("/tmp/project.gpr"))
@@ -131,6 +156,7 @@ def test_interrupt_releases_the_gui_event_loop():
     launcher.run_gui_event_loop()  # returns instead of blocking on _is_exiting
 
 
+@_requires_ghidra
 def test_gui_event_loop_still_ends_on_a_normal_gui_exit():
     launcher = GuiPyGhidraMcpLauncher(Path("/tmp/project.gpr"))
     launcher._is_exiting.set()
@@ -141,6 +167,7 @@ def test_gui_event_loop_still_ends_on_a_normal_gui_exit():
 
 
 @pytest.mark.parametrize("shutdown_signal", ["interrupt", "exit"])
+@_requires_ghidra
 def test_macos_gui_event_loop_skips_native_loop_after_shutdown(monkeypatch, shutdown_signal):
     launcher = GuiPyGhidraMcpLauncher(Path("/tmp/project.gpr"))
     if shutdown_signal == "interrupt":

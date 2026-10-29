@@ -276,6 +276,20 @@ class GhidraTools:
 
         return matches
 
+    def get_function_containing(self, address: str) -> typing.Any:
+        try:
+            af = self.program.getAddressFactory()
+            fm = self.program.getFunctionManager()
+            addr = af.getAddress(address)
+            if addr:
+                func = fm.getFunctionAt(addr)
+                if func is None:
+                    func = fm.getFunctionContaining(addr)
+                return func
+        except Exception:
+            pass
+        return None
+
     @handle_exceptions
     def find_function(
         self,
@@ -1361,6 +1375,7 @@ class GhidraTools:
             self.invalidate_decompiler_cache(wipe_l2=False)
             return {
                 "address": str(addr),
+                "function_address": str(addr),
                 "comment": comment,
                 "comment_type": "decompiler",
                 "old_comment": None if old_comment is None else str(old_comment),
@@ -1368,9 +1383,11 @@ class GhidraTools:
 
         ghidra_comment_type = self._ghidra_comment_type(normalized_type)
         addr = self._resolve_comment_target_address(target)
+        func_entry = None
         try:
             func = self.program.getFunctionManager().getFunctionContaining(addr)
             if func is not None:
+                func_entry = str(func.getEntryPoint())
                 self.evict_function_cache(func)
         except Exception:
             pass
@@ -1399,6 +1416,7 @@ class GhidraTools:
         self.invalidate_decompiler_cache(wipe_l2=False)
         return {
             "address": str(addr),
+            "function_address": func_entry,
             "comment": comment,
             "comment_type": normalized_type,
             "old_comment": None if old_comment is None else str(old_comment),

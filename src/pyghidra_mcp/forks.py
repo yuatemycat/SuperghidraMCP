@@ -359,9 +359,12 @@ def create_fork(
     total_bytes = sum(get_fork_disk_usage_bytes(Path(f["path"])) for f in existing)
     total_mb = total_bytes / (1024 * 1024)
 
-    # Estimate new fork size based on parent project storage
-    parent_proj_dir = Path(parent.project_directory)
-    est_new_fork_bytes = get_fork_disk_usage_bytes(parent_proj_dir) if parent_proj_dir.is_dir() else 0
+    # Estimate new fork size based on project .rep and chromadb storage
+    rep_dir = Path(parent.project_directory) / f"{parent.project_name}.rep"
+    est_new_fork_bytes = get_fork_disk_usage_bytes(rep_dir) if rep_dir.is_dir() else 0
+    chroma_dir = Path(parent.pyghidra_mcp_dir) / "chromadb"
+    if seed_index and chroma_dir.is_dir():
+        est_new_fork_bytes += get_fork_disk_usage_bytes(chroma_dir)
     est_total_mb = (total_bytes + est_new_fork_bytes) / (1024 * 1024)
 
     if len(existing) >= max_forks or est_total_mb >= max_fork_disk_mb:
@@ -395,7 +398,7 @@ def create_fork(
         total_mb = total_bytes / (1024 * 1024)
         est_total_mb = (total_bytes + est_new_fork_bytes) / (1024 * 1024)
 
-    if len(existing) >= max_forks or total_mb >= max_fork_disk_mb:
+    if len(existing) >= max_forks or est_total_mb >= max_fork_disk_mb:
         raise RuntimeError(
             f"Fork quota exceeded: {len(existing)} active fork(s) consuming {total_mb:.1f} MB "
             f"exceed configured limits (max_forks={max_forks}, max_fork_disk_mb={max_fork_disk_mb} MB). "
@@ -436,6 +439,15 @@ def create_fork(
         except Exception:
             logger.warning("Could not seed fork index from %s; it will be rebuilt.", source_index)
             shutil.rmtree(state_dir / "chromadb", ignore_errors=True)
+
+    actual_fork_bytes = get_fork_disk_usage_bytes(fork_dir)
+    actual_total_mb = (total_bytes + actual_fork_bytes) / (1024 * 1024)
+    if actual_total_mb > max_fork_disk_mb:
+        shutil.rmtree(fork_dir, ignore_errors=True)
+        raise RuntimeError(
+            f"Fork quota exceeded after creation: total storage {actual_total_mb:.1f} MB "
+            f"exceeds limit {max_fork_disk_mb} MB. Fork {fork_id} was removed."
+        )
 
     _write_json(
         fork_dir / FORK_META_FILE,
@@ -1048,7 +1060,32 @@ class ForkMerger:
                 # Group key includes binary so separate binaries with identical addresses don't collide.
                 groups: dict[Any, list[dict[str, Any]]] = {}
                 for op in pending_ops:
-                    fn_addr = op.get("function_address") or op.get("address")
+                    fn_addr = op.get("function_address")
+                    if not fn_addr and op.get("op") == "set_comment" and op.get("address"):
+                        try:
+                            binary = op.get("binary")
+                            if binary and hasattr(self, "context") and hasattr(self.context, "get_program_info"):
+                                pinfo = self.context.get_program_info(binary)
+                                tools = self.tools_factory(pinfo)
+                                func = None
+                                target_addr = op["address"]
+                                if hasattr(tools, "get_function_containing"):
+                                    func = self.run(lambda t=tools, a=target_addr: t.get_function_containing(a))
+                                elif hasattr(tools, "find_function"):
+                                    func = self.run(lambda t=tools, a=target_addr: t.find_function(a))
+                                if func is not None:
+                                    if hasattr(func, "getEntryPoint"):
+                                        fn_addr = str(func.getEntryPoint())
+                                    elif isinstance(func, dict) and "address" in func:
+                                        fn_addr = str(func["address"])
+                                    else:
+                                        ep = getattr(func, "entry_point", None)
+                                        if ep is not None:
+                                            fn_addr = str(ep)
+                        except Exception:
+                            pass
+                    if not fn_addr:
+                        fn_addr = op.get("address")
                     key = (op.get("binary", ""), fn_addr) if fn_addr is not None else f"__seq_{op['seq']}"
                     groups.setdefault(key, []).append(op)
 

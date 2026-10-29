@@ -148,6 +148,29 @@ def test_real_init_after_project_open_gzfs_none_and_default(tmp_path):
     assert ctx2.gzfs_path == ctx2.pyghidra_mcp_dir / "gzfs"
     assert ctx2.gzfs_path.is_dir()
 
+    # 3. With gzfs_path="" (empty string)
+    ctx3 = PyGhidraContext.__new__(PyGhidraContext)
+    ctx3.project_path = tmp_path / "real_proj3"
+    ctx3.project_path.mkdir(parents=True, exist_ok=True)
+    ctx3.programs = {}
+    with patch.object(ctx3, "_init_indexing_state"), patch.object(ctx3, "_init_project_programs"):
+        ctx3._init_after_project_open(
+            pyghidra_mcp_dir=ctx3.project_path / "superghidra-mcp",
+            force_analysis=False,
+            verbose_analysis=False,
+            no_symbols=False,
+            gdts=None,
+            program_options=None,
+            gzfs_path="",
+            threaded=False,
+            max_workers=1,
+            wait_for_analysis=False,
+            symbols_path=None,
+            sym_file_path=None,
+        )
+    assert ctx3.gzfs_path is None
+    assert not (ctx3.pyghidra_mcp_dir / "gzfs").exists()
+
 
 def test_init_context_gzfs_path_false_or_empty_suppresses_archives(tmp_path):
     """Passing False or empty string for gzfs_path must also suppress GZFS creation."""
@@ -483,3 +506,26 @@ def test_post_merge_preserves_fork_with_unresolved_conflicts(tmp_path):
     pruned_ids = [p["fork_id"] for p in res["pruned"]]
     assert fork.fork_id not in pruned_ids
     assert fork.fork_dir.exists()
+
+
+def test_create_fork_blocks_and_cleans_up_when_post_copy_quota_exceeded(tmp_path):
+    """When a new fork's disk usage exceeds max_fork_disk_mb,
+    the fork directory is removed and RuntimeError is raised.
+    """
+    parent = _make_parent_project(tmp_path)
+    rep_dir = parent.project_directory / f"{parent.project_name}.rep"
+    rep_dir.mkdir(parents=True, exist_ok=True)
+    (rep_dir / "large.dat").write_bytes(b"\x00" * (2 * 1024 * 1024))
+
+    # Existing active fork consumes 2 MB
+    fork1 = forks.create_fork(parent, label="active1", max_forks=10, max_fork_disk_mb=100)
+    assert fork1.fork_dir.is_dir()
+
+    # Attempt to create second fork with max_fork_disk_mb=3 MB (total would be 4 MB > 3 MB)
+    with pytest.raises(RuntimeError, match=r"(?i)quota"):
+        forks.create_fork(parent, label="active2", max_forks=10, max_fork_disk_mb=3)
+
+    # Verify active2 directory was completely removed and not left behind
+    all_fork_dirs = list(forks.forks_root(parent.pyghidra_mcp_dir).iterdir())
+    assert len(all_fork_dirs) == 1
+    assert all_fork_dirs[0] == fork1.fork_dir

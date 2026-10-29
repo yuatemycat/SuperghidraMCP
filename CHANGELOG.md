@@ -5,6 +5,15 @@ All notable changes to SuperghidraMCP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] - 2026-10-29
+
+### Fixed
+- **GZFS Empty String Sanitization**: Suppressed GZFS export when `--gzfs-path ""` is provided, preventing archive pollution in the current working directory.
+- **Fork Quota Enforcement**: Pre-checked estimated clone size against `max_fork_disk_mb` before cloning, and added post-copy disk measurement with rollback to strictly enforce storage quotas.
+- **Function-Scoped Comment Grouping**: Associated listing instruction comments with their enclosing function entry point so `atomic_by_function` merges apply or hold back atomically with other function mutations.
+- **Test Suite Environment Hardening**: Decorated GUI launcher tests with a Ghidra availability check to cleanly skip on headless test runners lacking a local Ghidra installation.
+- **Release Workflow Assets**: Added automatic asset upload (`action-gh-release@v2`) to GitHub Release workflows for wheels and sdists.
+
 ## [0.5.0] - 2026-10-27
 
 ### Added

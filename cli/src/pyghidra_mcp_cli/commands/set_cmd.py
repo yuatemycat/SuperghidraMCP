@@ -100,9 +100,7 @@ def set_function_prototype(
     "-t",
     "--type",
     "comment_type",
-    type=click.Choice(
-        ["decompiler", "plate", "pre", "eol", "post", "repeatable"], case_sensitive=False
-    ),
+    type=click.Choice(["decompiler", "plate", "pre", "eol", "post", "repeatable"], case_sensitive=False),
     default="decompiler",
     show_default=True,
     help="Comment type.",

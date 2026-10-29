@@ -30,9 +30,7 @@ def rename() -> None:
 @click.argument("function_name_or_address")
 @click.argument("new_name")
 @click.pass_context
-def rename_function(
-    ctx: click.Context, binary_name: str, function_name_or_address: str, new_name: str
-) -> None:
+def rename_function(ctx: click.Context, binary_name: str, function_name_or_address: str, new_name: str) -> None:
     """Rename a function."""
 
     client = PyGhidraMcpClient(host=ctx.obj["HOST"], port=ctx.obj["PORT"])
