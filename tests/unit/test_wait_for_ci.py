@@ -42,7 +42,19 @@ def test_fetch_runs_raises_on_persistent_failure():
 def test_main_aborts_on_discovery_timeout(monkeypatch):
     monkeypatch.setattr(
         "sys.argv",
-        ["wait_for_ci.py", "--commit", "abc", "--component", "cli", "--discovery-timeout", "1", "--min-runs", "1"],
+        [
+            "wait_for_ci.py",
+            "--commit",
+            "abc",
+            "--component",
+            "cli",
+            "--discovery-timeout",
+            "1",
+            "--min-runs",
+            "1",
+            "--settle-seconds",
+            "0",
+        ],
     )
     with patch("scripts.wait_for_ci.fetch_runs", return_value=[]), patch("time.sleep"):
         code = wait_ci.main()
@@ -52,7 +64,19 @@ def test_main_aborts_on_discovery_timeout(monkeypatch):
 def test_main_aborts_on_workflow_failure(monkeypatch):
     monkeypatch.setattr(
         "sys.argv",
-        ["wait_for_ci.py", "--commit", "abc", "--component", "cli", "--discovery-timeout", "5", "--min-runs", "1"],
+        [
+            "wait_for_ci.py",
+            "--commit",
+            "abc",
+            "--component",
+            "cli",
+            "--discovery-timeout",
+            "5",
+            "--min-runs",
+            "1",
+            "--settle-seconds",
+            "0",
+        ],
     )
     failed_run = [
         {
@@ -82,6 +106,8 @@ def test_main_dynamically_tracks_late_workflows_and_succeeds(monkeypatch):
             "5",
             "--min-runs",
             "1",
+            "--settle-seconds",
+            "0",
             "--interval",
             "1",
         ],
@@ -137,3 +163,121 @@ def test_main_dynamically_tracks_late_workflows_and_succeeds(monkeypatch):
     with patch("scripts.wait_for_ci.fetch_runs", side_effect=poll_states), patch("time.sleep"):
         code = wait_ci.main()
         assert code == 0, "Must succeed only after both initial and dynamically discovered runs pass!"
+
+
+def test_main_settles_and_catches_third_run_starting_after_first_two_pass(monkeypatch):
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "wait_for_ci.py",
+            "--commit",
+            "abc",
+            "--component",
+            "all",
+            "--discovery-timeout",
+            "5",
+            "--min-runs",
+            "2",
+            "--settle-seconds",
+            "2",
+            "--interval",
+            "1",
+        ],
+    )
+
+    # Initial runs 401 & 402 pass immediately.
+    # While settling, 403 (macOS compat) suddenly starts!
+    # Finally, 403 completes successfully.
+    r401_done = {
+        "databaseId": 401,
+        "name": "Pytest Local Repo Devcontainer Across Versions",
+        "headSha": "abc",
+        "status": "completed",
+        "conclusion": "success",
+    }
+    r402_done = {
+        "databaseId": 402,
+        "name": "Pytest Local Repo macOS Smoke",
+        "headSha": "abc",
+        "status": "completed",
+        "conclusion": "success",
+    }
+    r403_pending = {
+        "databaseId": 403,
+        "name": "Pytest Local Repo macOS Compatibility",
+        "headSha": "abc",
+        "status": "in_progress",
+        "conclusion": None,
+    }
+    r403_done = {
+        "databaseId": 403,
+        "name": "Pytest Local Repo macOS Compatibility",
+        "headSha": "abc",
+        "status": "completed",
+        "conclusion": "success",
+    }
+
+    poll_states = [
+        # Discovery: 401 and 402 present
+        [r401_done, r402_done],
+        # Poll 1 (settling): 401 and 402 done, but 403 appears in_progress!
+        [r401_done, r402_done, r403_pending],
+        # Poll 2: 403 is still running
+        [r401_done, r402_done, r403_pending],
+        # Poll 3: 403 completed
+        [r401_done, r402_done, r403_done],
+        # Poll 4 (settle satisfied): all 3 done
+        [r401_done, r402_done, r403_done],
+        # Poll 5
+        [r401_done, r402_done, r403_done],
+    ]
+
+    curr_time = [100.0]
+
+    def fake_monotonic():
+        return curr_time[0]
+
+    def fake_sleep(s):
+        curr_time[0] += s
+
+    with (
+        patch("scripts.wait_for_ci.fetch_runs", side_effect=poll_states),
+        patch("time.monotonic", side_effect=fake_monotonic),
+        patch("time.sleep", side_effect=fake_sleep),
+    ):
+        code = wait_ci.main()
+        assert code == 0, "Must track late 3rd run and wait for its completion!"
+
+
+def test_main_required_workflows_blocks_until_present(monkeypatch):
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "wait_for_ci.py",
+            "--commit",
+            "abc",
+            "--component",
+            "all",
+            "--required-workflows",
+            "macos compatibility",
+            "--discovery-timeout",
+            "1",
+            "--min-runs",
+            "1",
+            "--settle-seconds",
+            "0",
+        ],
+    )
+    # Only devcontainer present, macos compatibility missing
+    r_only_dev = [
+        {
+            "databaseId": 501,
+            "name": "Pytest Local Repo Devcontainer Across Versions",
+            "headSha": "abc",
+            "status": "completed",
+            "conclusion": "success",
+        }
+    ]
+    with patch("scripts.wait_for_ci.fetch_runs", return_value=r_only_dev), patch("time.sleep"):
+        code = wait_ci.main()
+        assert code == 1, "Must abort if required workflow is missing after discovery timeout!"

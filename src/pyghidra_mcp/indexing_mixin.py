@@ -19,6 +19,76 @@ logger = logging.getLogger(__name__)
 COLLECTION_COMPLETE_KEY = "pyghidra_index_complete"
 
 
+class ReadOnlyChromaCollection:
+    """Read-only proxy wrapper around a Chroma Collection."""
+
+    def __init__(self, collection: Any) -> None:
+        self._collection = collection
+
+    @property
+    def name(self) -> str:
+        return self._collection.name
+
+    @property
+    def id(self) -> Any:
+        return self._collection.id
+
+    @property
+    def metadata(self) -> dict[str, Any] | None:
+        return self._collection.metadata
+
+    def count(self) -> int:
+        return self._collection.count()
+
+    def get(self, *args: Any, **kwargs: Any) -> Any:
+        return self._collection.get(*args, **kwargs)
+
+    def query(self, *args: Any, **kwargs: Any) -> Any:
+        return self._collection.query(*args, **kwargs)
+
+    def peek(self, *args: Any, **kwargs: Any) -> Any:
+        return self._collection.peek(*args, **kwargs)
+
+    def add(self, *args: Any, **kwargs: Any) -> Any:
+        raise PermissionError("Parent Chroma collection is read-only in fork sessions")
+
+    def update(self, *args: Any, **kwargs: Any) -> Any:
+        raise PermissionError("Parent Chroma collection is read-only in fork sessions")
+
+    def upsert(self, *args: Any, **kwargs: Any) -> Any:
+        raise PermissionError("Parent Chroma collection is read-only in fork sessions")
+
+    def delete(self, *args: Any, **kwargs: Any) -> Any:
+        raise PermissionError("Parent Chroma collection is read-only in fork sessions")
+
+    def modify(self, *args: Any, **kwargs: Any) -> Any:
+        raise PermissionError("Parent Chroma collection is read-only in fork sessions")
+
+
+class ReadOnlyChromaClient:
+    """Read-only proxy wrapper around a Chroma ClientAPI."""
+
+    def __init__(self, client: Any) -> None:
+        self._client = client
+
+    def get_collection(self, name: str, *args: Any, **kwargs: Any) -> Any:
+        col = self._client.get_collection(name, *args, **kwargs)
+        return ReadOnlyChromaCollection(col)
+
+    def list_collections(self, *args: Any, **kwargs: Any) -> list[Any]:
+        cols = self._client.list_collections(*args, **kwargs)
+        return [ReadOnlyChromaCollection(c) for c in cols]
+
+    def create_collection(self, *args: Any, **kwargs: Any) -> Any:
+        raise PermissionError("Parent Chroma index is strictly read-only in fork sessions")
+
+    def delete_collection(self, *args: Any, **kwargs: Any) -> Any:
+        raise PermissionError("Parent Chroma index is strictly read-only in fork sessions")
+
+    def reset(self, *args: Any, **kwargs: Any) -> Any:
+        raise PermissionError("Parent Chroma index is strictly read-only in fork sessions")
+
+
 class IndexingMixin:
     """Shared MCP-side indexing behavior for headless and GUI contexts."""
 
@@ -36,14 +106,15 @@ class IndexingMixin:
         self.chroma_client = chromadb.PersistentClient(
             path=str(chromadb_path), settings=Settings(anonymized_telemetry=False)
         )
-        self.parent_chroma_client: chromadb.PersistentClient | None = None
+        self.parent_chroma_client: Any | None = None
         if parent_pyghidra_mcp_dir is not None:
             parent_chroma_path = parent_pyghidra_mcp_dir / "chromadb"
             if parent_chroma_path.is_dir():
                 try:
-                    self.parent_chroma_client = chromadb.PersistentClient(
+                    raw_client = chromadb.PersistentClient(
                         path=str(parent_chroma_path), settings=Settings(anonymized_telemetry=False)
                     )
+                    self.parent_chroma_client = ReadOnlyChromaClient(raw_client)
                 except Exception as exc:
                     logger.debug("Could not open parent chroma index: %s", exc)
         self.index_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1) if threaded else None
@@ -171,9 +242,10 @@ class IndexingMixin:
             pass
 
         # 2. Check parent chroma client read-only (never delete or rebuild in parent)
-        if getattr(self, "parent_chroma_client", None) is not None:
+        client = getattr(self, "parent_chroma_client", None)
+        if client is not None:
             try:
-                parent_col = self.parent_chroma_client.get_collection(name=name)
+                parent_col = client.get_collection(name=name)
                 metadata = parent_col.metadata or {}
                 if metadata.get(COLLECTION_COMPLETE_KEY):
                     logger.info("Using complete code index collection '%s' from parent project.", name)

@@ -351,25 +351,32 @@ def get_fork_disk_usage_bytes(fork_dir: Path) -> int:
 
 def _reflink_copy(src: str, dst: str, *, follow_symlinks: bool = True) -> None:
     """Copy a file using copy-on-write (reflink/clonefile) where supported, falling back to copy2."""
-    if hasattr(os, "clonefile"):
+    if sys.platform == "darwin":
         try:
-            # os.clonefile is available on macOS 10.12+ (APFS)
-            os.clonefile(src, dst)
-            return
-        except OSError:
+            import ctypes
+
+            libc = ctypes.CDLL("/usr/lib/libSystem.B.dylib", use_errno=True)
+            if hasattr(libc, "clonefile"):
+                # int clonefile(const char *from, const char *to, uint32_t flags);
+                res = libc.clonefile(src.encode("utf-8"), dst.encode("utf-8"), ctypes.c_uint32(0))
+                if res == 0:
+                    shutil.copystat(src, dst, follow_symlinks=follow_symlinks)
+                    return
+        except Exception:
             pass
 
     # On Linux, try FICLONE ioctl if supported (Btrfs, XFS)
     try:
         import fcntl
 
-        if hasattr(os, "O_RDONLY") and hasattr(os, "O_WRONLY") and hasattr(fcntl, "ioctl"):
+        ioctl_func = getattr(fcntl, "ioctl", None)
+        if ioctl_func is not None and hasattr(os, "O_RDONLY") and hasattr(os, "O_WRONLY"):
             ficlone_req = 0x40049409
             src_fd = os.open(src, os.O_RDONLY)
             try:
                 dst_fd = os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
                 try:
-                    fcntl.ioctl(dst_fd, ficlone_req, src_fd)
+                    ioctl_func(dst_fd, ficlone_req, src_fd)
                     shutil.copystat(src, dst, follow_symlinks=follow_symlinks)
                     return
                 finally:

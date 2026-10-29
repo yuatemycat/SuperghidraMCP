@@ -54,6 +54,17 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Minimum expected peer CI runs (default: 2 for 'all', 1 for 'cli').",
     )
+    parser.add_argument(
+        "--required-workflows",
+        default="",
+        help="Comma-separated list of required workflow name substrings (e.g. 'devcontainer,macos smoke').",
+    )
+    parser.add_argument(
+        "--settle-seconds",
+        type=int,
+        default=30,
+        help="Seconds to wait after all discovered workflows pass to ensure no late peer workflow starts.",
+    )
     return parser.parse_args()
 
 
@@ -97,7 +108,6 @@ def is_target_workflow(name: str, component: str) -> bool:
     # Ignore container build workflows
     if "docker" in name_lower:
         return False
-
     if component == "cli":
         return "cli devcontainer" in name_lower
     else:
@@ -109,14 +119,18 @@ def is_target_workflow(name: str, component: str) -> bool:
 def main() -> int:
     args = parse_args()
     min_expected = args.min_runs if args.min_runs is not None else (1 if args.component == "cli" else 2)
+    required_patterns = [p.strip().lower() for p in args.required_workflows.split(",") if p.strip()]
 
     print("=== SuperghidraMCP CI Gatekeeper ===")
-    print(f"Repository:        {args.repo}")
-    print(f"Commit SHA:        {args.commit}")
-    print(f"Component:         {args.component}")
-    print(f"Expected Min Runs: {min_expected}")
-    print(f"Discovery Timeout: {args.discovery_timeout}s")
-    print(f"Poll Timeout:      {args.timeout}s (interval: {args.interval}s)")
+    print(f"Repository:         {args.repo}")
+    print(f"Commit SHA:         {args.commit}")
+    print(f"Component:          {args.component}")
+    print(f"Expected Min Runs:  {min_expected}")
+    if required_patterns:
+        print(f"Required Workflows: {required_patterns}")
+    print(f"Discovery Timeout:  {args.discovery_timeout}s")
+    print(f"Settle Window:      {args.settle_seconds}s")
+    print(f"Poll Timeout:       {args.timeout}s (interval: {args.interval}s)")
 
     start_time = time.monotonic()
     discovered_target_ids: set[int] = set()
@@ -124,6 +138,8 @@ def main() -> int:
     # Step 1: Wait up to discovery_timeout for minimum expected peer workflows to appear
     print("\n[Step 1/2] Discovering peer CI workflow runs for this commit...")
     discovery_start = time.monotonic()
+    target_runs: list[dict[str, Any]] = []
+
     while True:
         try:
             runs = fetch_runs(args.repo, args.commit)
@@ -135,27 +151,36 @@ def main() -> int:
         for r in target_runs:
             discovered_target_ids.add(r["databaseId"])
 
-        if len(discovered_target_ids) >= min_expected:
+        discovered_names = [r.get("name", "").lower() for r in target_runs]
+        missing_required = [req for req in required_patterns if not any(req in name for name in discovered_names)]
+
+        if len(discovered_target_ids) >= min_expected and not missing_required:
             break
 
         elapsed_discovery = int(time.monotonic() - discovery_start)
         if elapsed_discovery >= args.discovery_timeout:
+            reasons = []
+            if len(discovered_target_ids) < min_expected:
+                reasons.append(f"found {len(discovered_target_ids)}/{min_expected} min runs")
+            if missing_required:
+                reasons.append(f"missing required workflow(s): {', '.join(missing_required)}")
             print(
                 f"\nError: Expected peer CI workflows did not appear within {elapsed_discovery}s "
-                f"(found {len(discovered_target_ids)}/{min_expected} expected). "
+                f"({'; '.join(reasons)}). "
                 "Aborting release publishing to prevent untested deployment.",
                 file=sys.stderr,
             )
             return 1
 
-        time.sleep(10)
+        time.sleep(min(args.interval, 10))
 
     print(f"\n[Step 2/2] Tracking {len(discovered_target_ids)} peer CI workflow(s):")
     for r in target_runs:
         print(f"  - [{r['databaseId']}] {r['name']} (event: {r.get('event')})")
 
-    # Step 2: Poll until all tracked workflows are completed successfully
-    # Continuously discovers any additional target runs that start late!
+    # Step 2: Poll until all tracked workflows are completed successfully and settled
+    settle_start_time: float | None = None
+
     while True:
         elapsed = int(time.monotonic() - start_time)
         if elapsed > args.timeout:
@@ -175,6 +200,7 @@ def main() -> int:
             if r["databaseId"] not in discovered_target_ids:
                 print(f"  + Dynamically tracked newly registered CI run: [{r['databaseId']}] {r['name']}")
                 discovered_target_ids.add(r["databaseId"])
+                settle_start_time = None  # Reset settle timer on new workflow discovery
 
         current_targets = [r for r in runs if r["databaseId"] in discovered_target_ids]
 
@@ -199,11 +225,35 @@ def main() -> int:
                 print(f"  FAILED: {name} (conclusion: {conclusion}) -> {url}", file=sys.stderr)
             return 1
 
-        if not pending and len(succeeded) >= len(discovered_target_ids) and len(succeeded) >= min_expected:
+        discovered_names = [r.get("name", "").lower() for r in current_targets]
+        missing_required = [req for req in required_patterns if not any(req in name for name in discovered_names)]
+
+        if (
+            not pending
+            and len(succeeded) >= len(discovered_target_ids)
+            and len(succeeded) >= min_expected
+            and not missing_required
+        ):
+            if args.settle_seconds > 0:
+                if settle_start_time is None:
+                    settle_start_time = time.monotonic()
+                settled_so_far = int(time.monotonic() - settle_start_time)
+                if settled_so_far < args.settle_seconds:
+                    remaining = args.settle_seconds - settled_so_far
+                    print(
+                        f"[{elapsed}s] All {len(succeeded)} workflows passed; "
+                        f"settling for {remaining}s to ensure no late peer workflow starts..."
+                    )
+                    time.sleep(min(args.interval, remaining if remaining > 0 else 1))
+                    continue
+
             print(f"\nAll {len(succeeded)} peer CI workflows passed successfully after {elapsed}s!")
             for name in succeeded:
                 print(f"  PASSED: {name}")
             return 0
+
+        # If any are pending, reset settle timer
+        settle_start_time = None
 
         pending_names = ", ".join(pending)
         status_msg = f"[{elapsed}s] Waiting: {len(succeeded)} passed, {len(pending)} active ({pending_names})..."

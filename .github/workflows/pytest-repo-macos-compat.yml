@@ -5,6 +5,8 @@ name: Pytest Local Repo macOS Compatibility
 on:
   schedule:
     - cron: '45 5,15 * * *'
+  release:
+    types: [published]
   workflow_dispatch:
 
 jobs:
