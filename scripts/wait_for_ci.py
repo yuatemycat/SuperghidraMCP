@@ -12,6 +12,7 @@ import subprocess
 import sys
 import time
 
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Wait for peer CI runs to succeed before release.")
     parser.add_argument("--commit", required=True, help="Git commit SHA (headSha) to inspect.")
@@ -52,7 +53,8 @@ def fetch_runs(repo: str, commit_sha: str):
 
     # Match runs with identical commit SHA (short or full)
     matching = [
-        r for r in all_runs
+        r
+        for r in all_runs
         if r.get("headSha", "").startswith(commit_sha) or commit_sha.startswith(r.get("headSha", ""))
     ]
     return matching
@@ -70,15 +72,12 @@ def is_target_workflow(name: str, component: str) -> bool:
     if component == "cli":
         return "cli devcontainer" in name_lower
     else:
-        return any(
-            k in name_lower
-            for k in ("devcontainer across versions", "macos smoke", "macos compatibility")
-        )
+        return any(k in name_lower for k in ("devcontainer across versions", "macos smoke", "macos compatibility"))
 
 
 def main():
     args = parse_args()
-    print(f"=== SuperghidraMCP CI Gatekeeper ===")
+    print("=== SuperghidraMCP CI Gatekeeper ===")
     print(f"Repository: {args.repo}")
     print(f"Commit SHA: {args.commit}")
     print(f"Component:  {args.component}")
@@ -142,7 +141,9 @@ def main():
                 print(f"  PASSED: {name}")
             return 0
 
-        print(f"[{elapsed}s] Waiting for CI: {len(succeeded)} succeeded, {len(pending)} in progress ({', '.join(pending)})...")
+        pending_names = ", ".join(pending)
+        status_msg = f"[{elapsed}s] Waiting: {len(succeeded)} passed, {len(pending)} active ({pending_names})..."
+        print(status_msg)
         time.sleep(args.interval)
 
 
