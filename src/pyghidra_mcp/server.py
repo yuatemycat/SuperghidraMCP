@@ -132,8 +132,12 @@ try:
 except TypeError:
     mcp = MCPServer("SuperghidraMCP", lifespan=server_lifespan)  # type: ignore
 
-if hasattr(mcp, "_mcp_server") and getattr(mcp._mcp_server, "version", None) is None:
-    mcp._mcp_server.version = __version__
+_inner_server: Any = getattr(mcp, "_mcp_server", None)
+if _inner_server is not None and getattr(_inner_server, "version", None) is None:
+    try:
+        _inner_server.version = __version__
+    except Exception:
+        pass
 
 
 def register_common_tools(server: MCPServer) -> None:
