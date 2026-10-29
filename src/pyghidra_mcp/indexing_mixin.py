@@ -24,12 +24,28 @@ class IndexingMixin:
 
     programs: dict[str, Any]
 
-    def _init_indexing_state(self, pyghidra_mcp_dir: Path, *, threaded: bool) -> None:
+    def _init_indexing_state(
+        self,
+        pyghidra_mcp_dir: Path,
+        *,
+        threaded: bool,
+        parent_pyghidra_mcp_dir: Path | None = None,
+    ) -> None:
         chromadb_path = pyghidra_mcp_dir / "chromadb"
         chromadb_path.mkdir(parents=True, exist_ok=True)
         self.chroma_client = chromadb.PersistentClient(
             path=str(chromadb_path), settings=Settings(anonymized_telemetry=False)
         )
+        self.parent_chroma_client: chromadb.PersistentClient | None = None
+        if parent_pyghidra_mcp_dir is not None:
+            parent_chroma_path = parent_pyghidra_mcp_dir / "chromadb"
+            if parent_chroma_path.is_dir():
+                try:
+                    self.parent_chroma_client = chromadb.PersistentClient(
+                        path=str(parent_chroma_path), settings=Settings(anonymized_telemetry=False)
+                    )
+                except Exception as exc:
+                    logger.debug("Could not open parent chroma index: %s", exc)
         self.index_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1) if threaded else None
         self._index_futures: dict[str, concurrent.futures.Future] = {}
         self._index_lock = threading.Lock()
@@ -137,19 +153,35 @@ class IndexingMixin:
         so an index interrupted partway through leaves an empty/partial
         collection on disk. Such a collection (and any legacy one lacking the
         marker) is deleted here so the caller rebuilds it from scratch.
+
+        In a fork context, collections completed by the parent are opened read-only
+        via parent_chroma_client. Incomplete parent collections are never deleted
+        or mutated by the fork; the fork simply rebuilds its own local collection.
         """
         name = self._normalize_collection_name(name)
+        # 1. Check local chroma client
         try:
             collection = self.chroma_client.get_collection(name=name)
+            metadata = collection.metadata or {}
+            if metadata.get(COLLECTION_COMPLETE_KEY):
+                return collection
+            logger.warning("Local collection '%s' is incomplete; deleting to rebuild.", name)
+            self.chroma_client.delete_collection(name=name)
         except Exception:
-            return None
+            pass
 
-        metadata = collection.metadata or {}
-        if metadata.get(COLLECTION_COMPLETE_KEY):
-            return collection
+        # 2. Check parent chroma client read-only (never delete or rebuild in parent)
+        if getattr(self, "parent_chroma_client", None) is not None:
+            try:
+                parent_col = self.parent_chroma_client.get_collection(name=name)
+                metadata = parent_col.metadata or {}
+                if metadata.get(COLLECTION_COMPLETE_KEY):
+                    logger.info("Using complete code index collection '%s' from parent project.", name)
+                    return parent_col
+                logger.info("Parent collection '%s' is incomplete; fork will build local copy.", name)
+            except Exception:
+                pass
 
-        logger.warning("Collection '%s' is incomplete (interrupted index?); deleting to rebuild.", name)
-        self.chroma_client.delete_collection(name=name)
         return None
 
     def _mark_collection_complete(self, collection: Any, function_count: int) -> None:

@@ -256,6 +256,7 @@ class ForkSession:
     project_name: str
     parent_project: Path
     label: str | None = None
+    seed_index: bool = True
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
     _next_seq: int = field(default=1, repr=False)
 
@@ -291,6 +292,7 @@ class ForkSession:
             project_name=meta["project_name"],
             parent_project=Path(meta["parent_project"]),
             label=meta.get("label"),
+            seed_index=meta.get("seed_index", True),
         )
         journal = read_journal(fork_dir)
         session._next_seq = max((e["seq"] for e in journal), default=0) + 1
@@ -345,6 +347,39 @@ def get_fork_disk_usage_bytes(fork_dir: Path) -> int:
     except OSError:
         pass
     return size_bytes
+
+
+def _reflink_copy(src: str, dst: str, *, follow_symlinks: bool = True) -> None:
+    """Copy a file using copy-on-write (reflink/clonefile) where supported, falling back to copy2."""
+    if hasattr(os, "clonefile"):
+        try:
+            # os.clonefile is available on macOS 10.12+ (APFS)
+            os.clonefile(src, dst)
+            return
+        except OSError:
+            pass
+
+    # On Linux, try FICLONE ioctl if supported (Btrfs, XFS)
+    try:
+        import fcntl
+
+        if hasattr(os, "O_RDONLY") and hasattr(os, "O_WRONLY") and hasattr(fcntl, "ioctl"):
+            ficlone_req = 0x40049409
+            src_fd = os.open(src, os.O_RDONLY)
+            try:
+                dst_fd = os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+                try:
+                    fcntl.ioctl(dst_fd, ficlone_req, src_fd)
+                    shutil.copystat(src, dst, follow_symlinks=follow_symlinks)
+                    return
+                finally:
+                    os.close(dst_fd)
+            finally:
+                os.close(src_fd)
+    except Exception:
+        pass
+
+    shutil.copy2(src, dst, follow_symlinks=follow_symlinks)
 
 
 def create_fork(
@@ -423,6 +458,7 @@ def create_fork(
             parent.project_directory / f"{name}.rep",
             fork_dir / f"{name}.rep",
             ignore=_ignore_lock_files,
+            copy_function=_reflink_copy,
         )
     except Exception:
         shutil.rmtree(fork_dir, ignore_errors=True)
@@ -434,25 +470,12 @@ def create_fork(
     suffix = "-pyghidra-mcp" if legacy_parent else "-superghidra-mcp"
     state_dir = fork_dir / f"{name}{suffix}"
     state_dir.mkdir()
-    source_index = parent.pyghidra_mcp_dir / "chromadb"
-    if seed_index and source_index.is_dir():
-        # Share the parent's completed code index read-only via directory junction / symlink
-        # instead of duplicating tens or hundreds of megabytes on disk.
-        target_chroma = state_dir / "chromadb"
-        try:
-            if os.name == "nt":
-                import _winapi
-
-                _winapi.CreateJunction(str(source_index.absolute()), str(target_chroma.absolute()))
-            else:
-                target_chroma.symlink_to(source_index.resolve(), target_is_directory=True)
-        except Exception as exc:
-            logger.debug("Could not link shared index (%s), attempting copy fallback.", exc)
-            try:
-                shutil.copytree(source_index, target_chroma)
-            except Exception:
-                logger.warning("Could not seed fork index from %s; it will be rebuilt.", source_index)
-                shutil.rmtree(target_chroma, ignore_errors=True)
+    # Note on Chroma indexing:
+    # We deliberately DO NOT create a directory junction or symlink here because
+    # OS-level symlinks/junctions forward write operations directly to the primary index.
+    # Instead, IndexingMixin provides read-only parent collection querying
+    # via parent_chroma_client, while any new collections or binary additions
+    # in this fork are isolated in the fork's own local state_dir / "chromadb".
 
     actual_fork_bytes = get_fork_disk_usage_bytes(fork_dir)
     actual_total_mb = (total_bytes + actual_fork_bytes) / (1024 * 1024)
@@ -483,6 +506,7 @@ def create_fork(
         project_name=name,
         parent_project=parent.gpr_path.absolute(),
         label=label,
+        seed_index=seed_index,
     )
 
 

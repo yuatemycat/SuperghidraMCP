@@ -188,7 +188,14 @@ class PyGhidraContext(IndexingMixin):
         if not self.threaded:
             logger.warning("--no-threaded flag forcing max_workers to 1")
             self.max_workers = 1
-        self._init_indexing_state(self.pyghidra_mcp_dir, threaded=self.threaded)
+        parent_dir = None
+        if self.fork_session is not None and getattr(self.fork_session, "seed_index", True):
+            parent_dir = self.fork_session.parent_pyghidra_mcp_dir
+        self._init_indexing_state(
+            self.pyghidra_mcp_dir,
+            threaded=self.threaded,
+            parent_pyghidra_mcp_dir=parent_dir,
+        )
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) if self.threaded else None
         self.import_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1) if self.threaded else None
         self.wait_for_analysis = wait_for_analysis

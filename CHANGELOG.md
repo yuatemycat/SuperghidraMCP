@@ -8,9 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Shared Chroma Index Linking**: Linked parent Chroma embeddings directory read-only via directory junction (Windows NTFS) or symlink (Linux/macOS) during fork creation, avoiding 50–200 MB disk duplication per fork while excluding linked trees from fork storage quotas.
+- **Chroma Index Isolation in Forks**: Replaced writable directory junctions and symlinks with client-level read-only querying of parent collections via `parent_chroma_client`. Fork modifications (e.g. `import_binary`) and local collection indexes write exclusively to the fork's local `chromadb` directory, preventing fork writes from leaking into the primary project or colliding on SQLite WAL locks. Incomplete parent collections are never deleted or rebuilt by forks.
+- **Copy-On-Write Project Cloning**: Implemented `_reflink_copy` (`clonefile` on macOS APFS, `FICLONE` ioctl on Linux Btrfs/XFS) in `shutil.copytree` for `.rep` project cloning, enabling instantaneous 0-byte COW forks on supported filesystems while falling back cleanly on ext4 and NTFS.
 - **Read-Only Session Fork Suppression**: Prompted informative error when `--read-only` is requested on a locked project rather than duplicating 150+ MB into a fork.
-- **Peer CI Matrix Release Gate**: Added `scripts/wait_for_ci.py` and `wait-for-ci` workflow jobs in `release.yml` and `release-cli.yml` to block PyPI publishing until all concurrent devcontainer matrix runs across Ghidra versions and macOS smoke runs pass.
+- **Hardened Release CI Gatekeeper (`wait_for_ci.py`)**: Enforced minimum expected workflow counts, continuous dynamic discovery of late-starting peer workflows, fail-fast non-zero exit (code 1) on discovery timeout or persistent `gh` API failures (preventing premature PyPI publishing), and immediate abort on workflow failures.
 
 ## [1.0.3] - 2026-10-29
 

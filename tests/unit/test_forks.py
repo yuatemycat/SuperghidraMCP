@@ -58,7 +58,15 @@ def test_create_fork_clones_project_without_locks_and_seeds_index(tmp_path):
     assert spec.gpr_path.is_file()
     assert (spec.project_directory / "proj.rep" / "idata" / "~index.dat").is_file()
     assert not (spec.project_directory / "proj.lock").exists()
-    assert (spec.pyghidra_mcp_dir / "chromadb" / "chroma.sqlite3").read_bytes() == b"db"
+    assert (fork.parent_pyghidra_mcp_dir / "chromadb" / "chroma.sqlite3").read_bytes() == b"db"
+    assert fork.seed_index is True
+
+    # Verify fork's Chroma directory is isolated and writes do not leak to parent
+    fork_chroma = spec.pyghidra_mcp_dir / "chromadb"
+    fork_chroma.mkdir(parents=True, exist_ok=True)
+    (fork_chroma / "fork_only.txt").write_text("fork data")
+    assert (fork_chroma / "fork_only.txt").exists()
+    assert not (parent.pyghidra_mcp_dir / "chromadb" / "fork_only.txt").exists()
 
     meta = json.loads((fork.fork_dir / forks.FORK_META_FILE).read_text())
     assert meta["status"] == "active"
