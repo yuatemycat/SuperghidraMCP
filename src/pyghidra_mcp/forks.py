@@ -690,6 +690,27 @@ def prune_forks(
                 }
             )
 
+    # Clean up orphaned directories in forks_root lacking fork.json older than 1 hour
+    for child in root.iterdir():
+        if child.is_dir() and not (child / FORK_META_FILE).is_file():
+            try:
+                mtime = child.stat().st_mtime
+                if (time.time() - mtime) > 3600:
+                    orphaned_bytes = sum(p.stat().st_size for p in child.rglob("*") if p.is_file())
+                    if not dry_run:
+                        shutil.rmtree(child, ignore_errors=True)
+                    total_bytes += orphaned_bytes
+                    pruned_summary.append(
+                        {
+                            "fork_id": child.name,
+                            "reason": "orphaned_unregistered_directory",
+                            "reclaimed_bytes": orphaned_bytes,
+                            "path": str(child),
+                        }
+                    )
+            except OSError:
+                pass
+
     return {
         "scanned": len(all_forks),
         "pruned": pruned_summary,

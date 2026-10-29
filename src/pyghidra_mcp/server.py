@@ -298,6 +298,17 @@ def create_project_context(
             max_fork_disk_mb=max_fork_disk_mb,
         )
         if reused is not None:
+            # Clean up any stale lock files left inside the fork directory from previous crashed processes
+            for lock_suffix in forks._LOCK_FILE_SUFFIXES:
+                stale_fork_lock = session.fork_dir / f"{session.project_name}{lock_suffix}"
+                if stale_fork_lock.is_file():
+                    try:
+                        stale_fork_lock.unlink()
+                        logger.info(
+                            "Cleaned up stale lock file in resumed fork %s: %s", session.fork_id, stale_fork_lock.name
+                        )
+                    except OSError:
+                        pass
             if session.op_count > 0:
                 logger.info("Resuming fork %s with unmerged edits.", session.fork_id)
             else:
@@ -318,6 +329,8 @@ def create_project_context(
             logger.warning("Could not open fork %s: %s", session.fork_id, e)
             if reused is None:
                 shutil.rmtree(session.fork_dir, ignore_errors=True)
+            else:
+                session.mark("failed")
             continue
         logger.warning(
             "Working on fork %s of %s. Edits are journaled; merge them from the primary session with merge_fork.",
