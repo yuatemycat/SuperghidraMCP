@@ -148,27 +148,28 @@ class PyGhidraMcpClient:
         """Extract data from MCP result, handling structuredContent and errors."""
         result_dict = result.model_dump(by_alias=True)
 
-        if result_dict.get("isError"):
+        if result_dict.get("isError") or result_dict.get("is_error"):
             content = result_dict.get("content", [])
             if content and len(content) > 0:
                 error_text = content[0].get("text", "Unknown error")
                 raise ClientError(error_text)
             raise ClientError("Unknown error occurred")
 
-        if "structuredContent" in result_dict:
-            structured = result_dict["structuredContent"]
-            if structured is None:
-                # Check if there's valid data in content[0].text (for metadata responses)
-                content = result_dict.get("content", [])
-                if content and len(content) > 0 and content[0].get("text"):
-                    try:
-                        return json.loads(content[0]["text"])
-                    except (json.JSONDecodeError, KeyError):
-                        pass
-                raise BinaryNotFoundError(
-                    "Binary not found. Run 'pyghidra-mcp-cli list binaries' to see available binaries."
-                )
+        structured = result_dict.get("structuredContent") or result_dict.get("structured_content")
+        if structured is not None:
             return structured
+
+        if "structuredContent" in result_dict or "structured_content" in result_dict:
+            # Check if there's valid data in content[0].text (for metadata responses)
+            content = result_dict.get("content", [])
+            if content and len(content) > 0 and content[0].get("text"):
+                try:
+                    return json.loads(content[0]["text"])
+                except (json.JSONDecodeError, KeyError):
+                    pass
+            raise BinaryNotFoundError(
+                "Binary not found. Run 'pyghidra-mcp-cli list binaries' to see available binaries."
+            )
 
         if result_dict is None or (isinstance(result_dict, dict) and not result_dict):
             raise BinaryNotFoundError(

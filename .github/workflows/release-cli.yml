@@ -35,9 +35,9 @@ jobs:
           pip install -e .[dev]
           pip install build
 
-      - name: Run tests
-        if: ${{ inputs.run-tests == 'true' }}
-        run: pytest
+      - name: Run CLI unit tests
+        run: |
+          python -m pytest tests/unit/
 
       - name: Build package
         run: python -m build

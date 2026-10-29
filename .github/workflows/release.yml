@@ -31,9 +31,9 @@ jobs:
           pip install -e .[dev]
           pip install build
 
-      - name: Run tests
-        if: ${{ inputs.run-tests == 'true' }}
-        run: pytest
+      - name: Run unit and fork tests
+        run: |
+          python -m pytest tests/unit/ tests/test_fork_storage_lifecycle.py tests/test_fork_conflict_resolution.py tests/test_fork_evidence_resolution.py
 
       - name: Build package
         run: python -m build
