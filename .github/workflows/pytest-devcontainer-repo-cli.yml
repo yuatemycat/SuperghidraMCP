@@ -11,7 +11,8 @@ on:
       - 'cli/tests/**'
       - 'cli/pyproject.toml'
       - 'cli/Makefile'
-      - '.github/workflows/pytest-devcontainer-repo-cli.yml'
+      - 'scripts/**'
+      - '.github/workflows/**'
   pull_request:
     branches: [ "main" ]
     paths:

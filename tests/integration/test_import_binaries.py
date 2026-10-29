@@ -1,5 +1,6 @@
 import asyncio
 import os
+import shutil
 import tempfile
 import zipfile
 from pathlib import Path
@@ -14,6 +15,8 @@ from pyghidra_mcp.context import PyGhidraContext
 @pytest.fixture()
 def binaries_in_directory():
     """Create a temporary filesystem with multiple test binaries in subdirectories."""
+    if shutil.which("gcc") is None:
+        pytest.skip("gcc compiler not available in PATH")
     with tempfile.TemporaryDirectory() as tmpdir:
         root = Path(tmpdir) / "filesystem"
         bin_dir = root / "bin"

@@ -8,7 +8,10 @@ on:
     paths:
       - 'src/pyghidra_mcp/**'
       - 'tests/**'
-      - '.github/workflows/pytest-repo-macos-smoke.yml'
+      - 'scripts/**'
+      - '.github/workflows/**'
+  release:
+    types: [published]
   pull_request:
     branches: [ "main" ]
     paths:

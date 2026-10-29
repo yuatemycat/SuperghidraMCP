@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import sys
 import tempfile
 
@@ -85,13 +86,20 @@ int main(void) {
         )
         c_file = f.name
 
+    if shutil.which("gcc") is None:
+        if os.path.exists(c_file):
+            os.unlink(c_file)
+        pytest.skip("gcc compiler not available in PATH")
+
     bin_file = c_file.replace(".c", "")
     os.system(f"gcc -g -O0 -o {bin_file} {c_file}")
 
     yield bin_file
 
-    os.unlink(c_file)
-    os.unlink(bin_file)
+    if os.path.exists(c_file):
+        os.unlink(c_file)
+    if os.path.exists(bin_file):
+        os.unlink(bin_file)
 
 
 @pytest.fixture(scope="module")

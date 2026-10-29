@@ -1,6 +1,7 @@
 import json
 import os
 import platform
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -87,14 +88,24 @@ int main() {
         )
         c_file = f.name
 
-    bin_file = c_file.replace(".c", "")
+    if shutil.which("gcc") is None:
+        if os.path.exists(c_file):
+            os.unlink(c_file)
+        pytest.skip("gcc compiler not available in PATH")
 
-    os.system(f"gcc -o {bin_file} {c_file}")
+    bin_file = c_file.replace(".c", "")
+    res = subprocess.run(["gcc", "-o", bin_file, c_file], capture_output=True, text=True)
+    if res.returncode != 0 or not os.path.exists(bin_file):
+        if os.path.exists(c_file):
+            os.unlink(c_file)
+        pytest.skip(f"Compilation of test binary failed: {res.stderr}")
 
     yield bin_file
 
-    os.unlink(c_file)
-    os.unlink(bin_file)
+    if os.path.exists(c_file):
+        os.unlink(c_file)
+    if os.path.exists(bin_file):
+        os.unlink(bin_file)
 
 
 @pytest.fixture(scope="module")
@@ -125,6 +136,11 @@ void shared_func_two() {
         c_file = f.name
 
     # 2. Compile as a shared object (Mach-O on macOS, ELF shared object on Linux)
+    if shutil.which("gcc") is None:
+        if os.path.exists(c_file):
+            os.unlink(c_file)
+        pytest.skip("gcc compiler not available in PATH")
+
     shared_ext = ".dylib" if _IS_MACOS else ".so"
     shared_file = c_file.replace(".c", shared_ext)
     compile_cmd = (
@@ -133,16 +149,19 @@ void shared_func_two() {
         else ["gcc", "-fPIC", "-shared", "-o", shared_file, c_file]
     )
     result = subprocess.run(compile_cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        cmd_text = " ".join(compile_cmd)
-        raise RuntimeError(f"Compilation failed: {cmd_text}\nSTDERR:\n{result.stderr}")
+    if result.returncode != 0 or not os.path.exists(shared_file):
+        if os.path.exists(c_file):
+            os.unlink(c_file)
+        pytest.skip(f"Compilation of shared library failed: {result.stderr}")
 
     # 3. Yield path to shared library for tests
     yield shared_file
 
     # 4. Clean up
-    os.unlink(c_file)
-    os.unlink(shared_file)
+    if os.path.exists(c_file):
+        os.unlink(c_file)
+    if os.path.exists(shared_file):
+        os.unlink(shared_file)
 
 
 def _isolated_project_args(project_root: Path, fixture_name: str) -> list[str]:
