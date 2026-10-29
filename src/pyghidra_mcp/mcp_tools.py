@@ -151,15 +151,19 @@ def _journal(pyghidra_context: MCPContext, program_info: Any, op: str, **fields:
 
 
 def _check_read_only(pyghidra_context: Any, op: str | None = None) -> None:
-    target = pyghidra_context.request_context.lifespan_context if hasattr(pyghidra_context, "request_context") else pyghidra_context
+    target = (
+        pyghidra_context.request_context.lifespan_context
+        if hasattr(pyghidra_context, "request_context")
+        else pyghidra_context
+    )
     if getattr(target, "read_only", False) is True:
-        msg = f"Session is read-only; {op} disallowed." if op else "Session is read-only; mutation operations are disallowed."
+        msg = (
+            f"Session is read-only; {op} disallowed."
+            if op
+            else "Session is read-only; mutation operations are disallowed."
+        )
         raise ValueError(msg)
     return
-
-
-
-
 
 
 def _session_info(pyghidra_context: MCPContext) -> SessionInfo | None:
@@ -233,9 +237,25 @@ def _get_default_ledger_path() -> str:
 
 
 ALLOWED_OUTPUT_EXTENSIONS = {
-    ".debug", ".pdb", ".sym", ".map", ".json", ".py", ".sqlite",
-    ".db", ".sqlite3", ".txt", ".h", ".c", ".cpp", ".log", ".csv",
-    ".bin", ".idx", ".xml", "",
+    ".debug",
+    ".pdb",
+    ".sym",
+    ".map",
+    ".json",
+    ".py",
+    ".sqlite",
+    ".db",
+    ".sqlite3",
+    ".txt",
+    ".h",
+    ".c",
+    ".cpp",
+    ".log",
+    ".csv",
+    ".bin",
+    ".idx",
+    ".xml",
+    "",
 }
 
 
@@ -281,20 +301,24 @@ def _resolve_safe_path(
                 val = os.environ.get(env_var)
                 if val:
                     sys_dirs.append(Path(val).resolve())
-            sys_dirs.extend([
-                Path(r"C:\Windows").resolve(),
-                Path(r"C:\Program Files").resolve(),
-                Path(r"C:\Program Files (x86)").resolve(),
-            ])
+            sys_dirs.extend(
+                [
+                    Path(r"C:\Windows").resolve(),
+                    Path(r"C:\Program Files").resolve(),
+                    Path(r"C:\Program Files (x86)").resolve(),
+                ]
+            )
         else:
-            sys_dirs.extend([
-                Path("/etc").resolve(),
-                Path("/usr").resolve(),
-                Path("/bin").resolve(),
-                Path("/sbin").resolve(),
-                Path("/System").resolve(),
-                Path("/Library").resolve(),
-            ])
+            sys_dirs.extend(
+                [
+                    Path("/etc").resolve(),
+                    Path("/usr").resolve(),
+                    Path("/bin").resolve(),
+                    Path("/sbin").resolve(),
+                    Path("/System").resolve(),
+                    Path("/Library").resolve(),
+                ]
+            )
 
         for sd in sys_dirs:
             try:
@@ -356,9 +380,7 @@ async def decompile_function(
 
     def _decompile_target(target: str) -> DecompiledFunction:
         if emit_compilable:
-            result = tools.decompile_function_by_name_or_addr(
-                target, timeout=timeout_sec, emit_compilable=True
-            )
+            result = tools.decompile_function_by_name_or_addr(target, timeout=timeout_sec, emit_compilable=True)
         else:
             result = tools.decompile_function_by_name_or_addr(target, timeout=timeout_sec)
         if include_callees:
@@ -409,9 +431,7 @@ def search_symbols_by_name(
     pyghidra_context = _get_pyghidra_context(ctx)
     program_info = pyghidra_context.get_program_info(binary_name)
     tools = GhidraTools(program_info)
-    symbols = tools.search_symbols_by_name(
-        query, functions_only=functions_only, offset=offset, limit=limit
-    )
+    symbols = tools.search_symbols_by_name(query, functions_only=functions_only, offset=offset, limit=limit)
     return SymbolSearchResults(symbols=symbols)
 
 
@@ -715,9 +735,7 @@ def list_imports(
 
 
 @mcp_error_handler
-def list_xrefs(
-    binary_name: str, name_or_address: str | list[str], ctx: Context
-) -> list[CrossReferenceInfos]:
+def list_xrefs(binary_name: str, name_or_address: str | list[str], ctx: Context) -> list[CrossReferenceInfos]:
     """List cross-references to function(s), symbol(s), or address(es).
 
     Accepts a single target or a list for batch lookup.
@@ -878,8 +896,12 @@ def merge_fork(
     fork_id: str,
     ctx: Context,
     dry_run: bool = False,
-    on_conflict: Literal["skip", "overwrite"] = "skip",
+    on_conflict: Literal["skip", "overwrite", "combine", "evidence"] = "skip",
     auto_discard: bool = True,
+    combine_comments: bool = False,
+    preserve_alias: bool = False,
+    atomic_by_function: bool = False,
+    decide_with_evidence: bool = False,
 ) -> ForkMergeResult:
     """Replay a fork's journaled edits into this (primary) project.
 
@@ -887,20 +909,33 @@ def merge_fork(
     or forced with on_conflict="overwrite". Re-running only retries unresolved edits.
     If `auto_discard=True` (default) and all edits are resolved cleanly (`pending_ops == 0`),
     the fork directory is automatically deleted to reclaim disk storage.
+    If `combine_comments=True`, conflicting comments are combined and preserved.
+    If `preserve_alias=True`, conflicting renames retain the losing name as a plate comment.
+    If `atomic_by_function=True`, all mutations on the same function apply or roll back together.
+    If `decide_with_evidence=True` or `on_conflict="evidence"`, the edit with higher epistemic
+    certainty (e.g. SMT_PROVEN / DWARF vs heuristic default) automatically wins.
     """
     pyghidra_context = _get_pyghidra_context(ctx)
     _check_read_only(pyghidra_context)
     if _fork_session(pyghidra_context) is not None:
         raise ValueError(
-            "This session is itself a fork; merge_fork must run on the primary session "
-            "that holds the main project."
+            "This session is itself a fork; merge_fork must run on the primary session that holds the main project."
         )
     merger = forks.ForkMerger(
         pyghidra_context,
         GhidraTools,
         run=lambda fn: _run_for_context(pyghidra_context, fn),
     )
-    result = merger.merge(fork_id, dry_run=dry_run, on_conflict=on_conflict, auto_discard=auto_discard)
+    result = merger.merge(
+        fork_id,
+        dry_run=dry_run,
+        on_conflict=on_conflict,
+        auto_discard=auto_discard,
+        combine_comments=combine_comments,
+        preserve_alias=preserve_alias,
+        atomic_by_function=atomic_by_function,
+        decide_with_evidence=decide_with_evidence,
+    )
     return ForkMergeResult(**result)
 
 
@@ -943,11 +978,16 @@ def resolve_conflict(
     ctx: Context,
     fork_id: str,
     seq: int,
-    keep: str = "primary",
+    keep: Literal["primary", "fork", "both", "evidence"] = "primary",
 ) -> dict[str, Any]:
-    """Resolve a single conflicting edit from a fork. 'keep' can be 'primary' (keep primary value, discard fork edit), 'fork' (apply fork edit over primary), or 'both' (combine comments or preserve fork's rename as a function alias comment)."""
-    if keep not in ("primary", "fork", "both"):
-        raise ValueError("keep must be 'primary', 'fork', or 'both'")
+    """Resolve a single conflicting edit from a fork.
+
+    'keep' can be 'primary' (keep primary value, discard fork edit), 'fork' (apply
+    fork edit over primary), 'both' (combine comments or preserve fork's rename as an alias
+    comment), or 'evidence' (decide based on epistemic provenance and obligations).
+    """
+    if keep not in ("primary", "fork", "both", "evidence"):
+        raise ValueError("keep must be 'primary', 'fork', 'both', or 'evidence'")
     _check_read_only(ctx, "resolve_conflict")
     pyghidra_context = _get_pyghidra_context(ctx)
     if _fork_session(pyghidra_context) is not None:
@@ -966,7 +1006,10 @@ def resolve_conflict(
 
 @mcp_error_handler
 def sync_fork(ctx: Context, fork_id: str | None = None) -> dict[str, Any]:
-    """Synchronize a fork's merge state with the primary project. Reports resolved edits and active conflicts to the fork agent."""
+    """Synchronize a fork's merge state with the primary project.
+
+    Reports resolved edits and active conflicts to the fork agent.
+    """
     pyghidra_context = _get_pyghidra_context(ctx)
     target_fork_id = fork_id
     fork = _fork_session(pyghidra_context)
@@ -1051,6 +1094,7 @@ def _ensure_superghidra_imported():
     # Respect installed package first; do not silently override with SUPERGHIDRA_PATH
     try:
         import superghidra  # noqa: F401
+
         return
     except ImportError:
         pass
@@ -1111,6 +1155,7 @@ def _get_program_executable_segments(program_info: Any) -> list[tuple[bytes, int
                 if raw.startswith(b"\x7fELF"):
                     _ensure_superghidra_imported()
                     from superghidra.integrations.colab_cloud_orchestrator import ColabCloudOrchestrator
+
                     elf_vaddr, elf_exec_bytes = ColabCloudOrchestrator.extract_elf_executable_slice(raw)
                     if elf_exec_bytes:
                         segments.append((elf_exec_bytes, elf_vaddr))
@@ -1232,6 +1277,7 @@ def gpu_adrp_scan(
                 source_type = None
                 try:
                     from ghidra.program.model.symbol import RefType, SourceType
+
                     ref_type = RefType.DATA
                     source_type = SourceType.ANALYSIS
                 except Exception:
@@ -1347,6 +1393,7 @@ def gpu_seed_functions(
                 try:
                     from ghidra.program.model.address import AddressSet
                     from ghidra.program.model.symbol import SourceType
+
                     source_type = SourceType.ANALYSIS
                     addr_set_cls = AddressSet
                 except Exception:
@@ -1816,8 +1863,16 @@ def cross_reference_apk_jni(
 
     if java_sources:
         type_map = {
-            "void": "V", "boolean": "Z", "byte": "B", "char": "C", "short": "S",
-            "int": "I", "long": "J", "float": "F", "double": "D", "String": "Ljava/lang/String;",
+            "void": "V",
+            "boolean": "Z",
+            "byte": "B",
+            "char": "C",
+            "short": "S",
+            "int": "I",
+            "long": "J",
+            "float": "F",
+            "double": "D",
+            "String": "Ljava/lang/String;",
         }
 
         def _type_to_jni(t_str: str) -> str:
@@ -1945,6 +2000,7 @@ def _parse_functions_for_diff(input_str: str) -> tuple[list[Any], bool]:
 
         if is_binary:
             from superghidra.diff import binary_diff_engine
+
             if hasattr(binary_diff_engine, "extract_cfgs_from_binary"):
                 return binary_diff_engine.extract_cfgs_from_binary(str(safe_path)), False
             # Seed CFGs directly from raw binary bytes
@@ -2001,11 +2057,13 @@ def _parse_functions_for_diff(input_str: str) -> tuple[list[Any], bool]:
                 if isinstance(insn, str):
                     bb.instructions.append(InstructionInfo.create(address=address + i_idx * 4, mnemonic=insn))
                 elif isinstance(insn, dict):
-                    bb.instructions.append(InstructionInfo.create(
-                        address=insn.get("address", address + i_idx * 4),
-                        mnemonic=insn.get("mnemonic", "nop"),
-                        op_str=insn.get("op_str", "")
-                    ))
+                    bb.instructions.append(
+                        InstructionInfo.create(
+                            address=insn.get("address", address + i_idx * 4),
+                            mnemonic=insn.get("mnemonic", "nop"),
+                            op_str=insn.get("op_str", ""),
+                        )
+                    )
             cfg.add_block(bb)
         else:
             for b_item in blocks_data:
@@ -2016,11 +2074,13 @@ def _parse_functions_for_diff(input_str: str) -> tuple[list[Any], bool]:
                     if isinstance(insn, str):
                         bb.instructions.append(InstructionInfo.create(address=b_start + i_idx * 4, mnemonic=insn))
                     elif isinstance(insn, dict):
-                        bb.instructions.append(InstructionInfo.create(
-                            address=insn.get("address", b_start + i_idx * 4),
-                            mnemonic=insn.get("mnemonic", "nop"),
-                            op_str=insn.get("op_str", "")
-                        ))
+                        bb.instructions.append(
+                            InstructionInfo.create(
+                                address=insn.get("address", b_start + i_idx * 4),
+                                mnemonic=insn.get("mnemonic", "nop"),
+                                op_str=insn.get("op_str", ""),
+                            )
+                        )
                 cfg.add_block(bb)
 
         for edge in item.get("edges", []):
@@ -2372,17 +2432,19 @@ def migrate_semantic_deltas(
 
     safe_output_delta = None
     if output_delta_log_path:
-        safe_output_delta = str(_resolve_safe_path(
-            output_delta_log_path, must_exist=False, for_write=True,
-            allowed_extensions={".jsonl", ".json", ".log", ".txt", ".py"}
-        ))
+        safe_output_delta = str(
+            _resolve_safe_path(
+                output_delta_log_path,
+                must_exist=False,
+                for_write=True,
+                allowed_extensions={".jsonl", ".json", ".log", ".txt", ".py"},
+            )
+        )
 
     engine = DeltaMigrationEngine(similarity_threshold=threshold)
     engine.run_diff_pairing(funcs_a, funcs_b)
 
-    report, _migrated_events = engine.migrate_events(
-        baseline_events, target_log_path=safe_output_delta
-    )
+    report, _migrated_events = engine.migrate_events(baseline_events, target_log_path=safe_output_delta)
 
     record_items = [
         MigratedEventRecordItem(
@@ -2438,10 +2500,14 @@ def preindex_dwarf_pdb(
     )
 
     if db_output_path and db_output_path != ":memory:":
-        safe_db = str(_resolve_safe_path(
-            db_output_path, must_exist=False, for_write=True,
-            allowed_extensions={".sqlite", ".db", ".sqlite3", ".idx", ".bin"}
-        ))
+        safe_db = str(
+            _resolve_safe_path(
+                db_output_path,
+                must_exist=False,
+                for_write=True,
+                allowed_extensions={".sqlite", ".db", ".sqlite3", ".idx", ".bin"},
+            )
+        )
         db_target = safe_db
     else:
         db_target = ":memory:"
@@ -2457,10 +2523,9 @@ def preindex_dwarf_pdb(
     path_str = str(safe_bin_path)
     if stripped.startswith(b"\x7fELF"):
         store.ingest_dwarf5_elf(raw_bytes, dedup=dedup)
-    elif (
-        stripped.startswith(b"Microsoft C/C++ MSF 7.00")
-        or path_str.lower().endswith(".pdb")
-    ) and hasattr(store, "ingest_pdb"):
+    elif (stripped.startswith(b"Microsoft C/C++ MSF 7.00") or path_str.lower().endswith(".pdb")) and hasattr(
+        store, "ingest_pdb"
+    ):
         store.ingest_pdb(raw_bytes)
     elif stripped.startswith(b"{") or path_str.lower().endswith(".json"):
         store.load_json(path_str)
@@ -2546,29 +2611,55 @@ def inspect_binary(
 
     exports = [
         {"name": e.name, "address": hex(e.address), "ordinal": e.ordinal, "forwarder": e.forwarder}
-        for e in img.exports if keep(e.name)
+        for e in img.exports
+        if keep(e.name)
     ]
     imports = [
-        {"library": i.library, "name": i.name, "ordinal": i.ordinal,
-         "slot": hex(i.address) if i.address else None, "delay_loaded": i.delay_loaded}
-        for i in img.imports if keep(i.name)
+        {
+            "library": i.library,
+            "name": i.name,
+            "ordinal": i.ordinal,
+            "slot": hex(i.address) if i.address else None,
+            "delay_loaded": i.delay_loaded,
+        }
+        for i in img.imports
+        if keep(i.name)
     ]
     sections = [
-        {"name": s.name, "vaddr": hex(s.vaddr), "size": s.vsize, "file_offset": s.file_offset,
-         "executable": s.executable, "writable": s.writable}
-        for s in (img.sections or img.segments) if s.mapped
+        {
+            "name": s.name,
+            "vaddr": hex(s.vaddr),
+            "size": s.vsize,
+            "file_offset": s.file_offset,
+            "executable": s.executable,
+            "writable": s.writable,
+        }
+        for s in (img.sections or img.segments)
+        if s.mapped
     ]
     return InspectBinaryResult(
-        path=str(path), format=img.format, arch=img.arch, bits=img.bits, endian=img.endian,
-        image_base=hex(img.image_base), entry=hex(img.entry) if img.entry is not None else None,
-        is_library=img.is_library, is_dotnet=img.is_dotnet, pdb_path=img.pdb_path,
-        libraries=img.libraries, sections=sections,
-        exports=exports[:limit], imports=imports[:limit],
-        total_exports=len(img.exports), total_imports=len(img.imports),
+        path=str(path),
+        format=img.format,
+        arch=img.arch,
+        bits=img.bits,
+        endian=img.endian,
+        image_base=hex(img.image_base),
+        entry=hex(img.entry) if img.entry is not None else None,
+        is_library=img.is_library,
+        is_dotnet=img.is_dotnet,
+        pdb_path=img.pdb_path,
+        libraries=img.libraries,
+        sections=sections,
+        exports=exports[:limit],
+        imports=imports[:limit],
+        total_exports=len(img.exports),
+        total_imports=len(img.imports),
         total_function_starts=len(img.function_starts),
-        message=(f"{img.format.upper()} {img.arch} {img.bits}-bit {'library' if img.is_library else 'executable'}: "
-                 f"{len(img.exports)} exports, {len(img.imports)} imports, "
-                 f"{len(img.function_starts)} known functions."),
+        message=(
+            f"{img.format.upper()} {img.arch} {img.bits}-bit {'library' if img.is_library else 'executable'}: "
+            f"{len(img.exports)} exports, {len(img.imports)} imports, "
+            f"{len(img.function_starts)} known functions."
+        ),
     )
 
 
@@ -2604,18 +2695,26 @@ def recover_cpp_classes(
     data: dict[str, Any] = cast(dict[str, Any], report.to_dict())
     needle = (name_filter or "").lower()
     limit = max(0, min(int(limit), 10000))
-    mfc = [c for c in data["mfc_classes"]
-           if (not needle or needle in c["name"].lower()) and (c["serializable"] or not serializable_only)]
+    mfc = [
+        c
+        for c in data["mfc_classes"]
+        if (not needle or needle in c["name"].lower()) and (c["serializable"] or not serializable_only)
+    ]
     rtti = [c for c in data["rtti_classes"] if not needle or needle in c["name"].lower()]
     counts: dict[str, Any] = cast(dict[str, Any], data["counts"])
     return RecoverCppClassesResult(
-        path=str(path), arch=report.arch,
-        total_mfc_classes=counts["mfc"], total_serializable=counts["mfc_serializable"],
+        path=str(path),
+        arch=report.arch,
+        total_mfc_classes=counts["mfc"],
+        total_serializable=counts["mfc_serializable"],
         total_rtti_classes=counts["rtti"],
-        mfc_classes=mfc[:limit], rtti_classes=rtti[:limit],
-        message=(f"{counts['mfc']} MFC CRuntimeClass records ({counts['mfc_serializable']} serializable, "
-                 f"{sum(1 for c in report.mfc_classes if c.serialize)} with Serialize() resolved) and "
-                 f"{counts['rtti']} RTTI classes."),
+        mfc_classes=mfc[:limit],
+        rtti_classes=rtti[:limit],
+        message=(
+            f"{counts['mfc']} MFC CRuntimeClass records ({counts['mfc_serializable']} serializable, "
+            f"{sum(1 for c in report.mfc_classes if c.serialize)} with Serialize() resolved) and "
+            f"{counts['rtti']} RTTI classes."
+        ),
     )
 
 
@@ -2667,8 +2766,11 @@ def trace_serialize(
     p = _resolve_safe_path(binary_path, must_exist=True, for_write=False)
     tracer = _serialize_tracer(p, 0 if binary_format_only else None)
     needle = (class_filter or "").lower()
-    names = [c.name for c in tracer.report.mfc_classes
-             if c.serializable and c.serialize and (not needle or needle in c.name.lower())]
+    names = [
+        c.name
+        for c in tracer.report.mfc_classes
+        if c.serializable and c.serialize and (not needle or needle in c.name.lower())
+    ]
     traces = tracer.trace_classes(names)
     limit = max(0, min(int(limit), 5000))
     out = []
@@ -2685,7 +2787,11 @@ def trace_serialize(
         out.append(d)
     mirrored = sum(1 for t in traces if t.mirrored)
     return TraceSerializeResult(
-        path=str(p), arch=tracer.img.arch, total_traced=len(traces), total_mirrored=mirrored, traces=out,
+        path=str(p),
+        arch=tracer.img.arch,
+        total_traced=len(traces),
+        total_mirrored=mirrored,
+        traces=out,
         message=(f"Traced {len(traces)} Serialize() functions; {mirrored} have matching load/store paths."),
     )
 
@@ -2737,9 +2843,13 @@ def decode_carchive(
         if cal.get("variable") is not None:
             use_env = {cal["variable"]: cal["value"]}
         cal_trials = cast(list[dict[str, Any]], cal.get("trials", []))
-        cal = {"variable": cal.get("variable"), "value": cal.get("value"),
-               "max_known_threshold": cal.get("max_known_threshold"), "warning": cal.get("warning"),
-               "trials": sorted(cal_trials, key=lambda t: -t["decoded_bytes"])[:10]}
+        cal = {
+            "variable": cal.get("variable"),
+            "value": cal.get("value"),
+            "max_known_threshold": cal.get("max_known_threshold"),
+            "warning": cal.get("warning"),
+            "trials": sorted(cal_trials, key=lambda t: -t["decoded_bytes"])[:10],
+        }
     res: dict[str, Any] = cast(
         dict[str, Any],
         mfc_archive.decode_stream(data, layouts, start=int(offset), env=cast(Any, use_env)),
@@ -2747,12 +2857,23 @@ def decode_carchive(
     limit = max(0, min(int(limit), 20000))
     s: dict[str, Any] = cast(dict[str, Any], res["stats"])
     return DecodeCArchiveResult(
-        stream_path=str(sp), length=res["length"], layout_binaries=[str(b) for b in bins], layouts=len(layouts),
-        env=cast(Any, use_env), calibration=cal, stats=s, map_reliable=res["map_reliable"], classes=res["classes"],
-        gaps=res["gaps"], objects=res["objects"][:limit], truncated=len(res["objects"]) > limit,
-        message=(f"{s['decoded']} objects decoded, {s['partial']} partial, {s['opaque']} without layout, "
-                 f"{s.get('error', 0)} malformed; {sum(g['length'] for g in res['gaps'])} of {res['length']} "
-                 f"bytes not decoded." + (f" Warning: {cal['warning']}" if cal and cal.get("warning") else "")),
+        stream_path=str(sp),
+        length=res["length"],
+        layout_binaries=[str(b) for b in bins],
+        layouts=len(layouts),
+        env=cast(Any, use_env),
+        calibration=cal,
+        stats=s,
+        map_reliable=res["map_reliable"],
+        classes=res["classes"],
+        gaps=res["gaps"],
+        objects=res["objects"][:limit],
+        truncated=len(res["objects"]) > limit,
+        message=(
+            f"{s['decoded']} objects decoded, {s['partial']} partial, {s['opaque']} without layout, "
+            f"{s.get('error', 0)} malformed; {sum(g['length'] for g in res['gaps'])} of {res['length']} "
+            f"bytes not decoded." + (f" Warning: {cal['warning']}" if cal and cal.get("warning") else "")
+        ),
     )
 
 
@@ -2862,9 +2983,7 @@ def compile_usercall_prototype(
     compiler = UsercallPrototypeCompiler(arch=arch)
     proto = compiler.parse_usercall(signature)
     ret_storage = (
-        ", ".join(proto.return_binding.registers)
-        if proto.return_binding and proto.return_binding.registers
-        else "void"
+        ", ".join(proto.return_binding.registers) if proto.return_binding and proto.return_binding.registers else "void"
     )
     param_storages = [
         f"{p.name}@{','.join(p.registers)}" if p.registers else f"{p.name}@stack[{p.stack_offset}]"
@@ -2932,10 +3051,7 @@ def deflatten_control_flow(
     deflattener = SymbolicCFGDeflattener()
     report = deflattener.deflatten_state_machine(cfg, explicit_dispatcher_id=dispatcher_block_id)
 
-    restructured = [
-        {"id": bid, "successors": blk.successors}
-        for bid, blk in sorted(cfg.blocks.items())
-    ]
+    restructured = [{"id": bid, "successors": blk.successors} for bid, blk in sorted(cfg.blocks.items())]
     eliminated = len(report.get("rewired_edges", []))
     return CFFDeflattenResult(
         dispatcher_block_id=dispatcher_block_id,
@@ -3002,8 +3118,7 @@ def query_binary_dataflow(
         path_length=path_len,
         traversed_nodes=witness,
         message=(
-            f"Dataflow reachability from {source_var} to {sink_var}: "
-            f"{res.get('reachable', False)} (hops: {path_len})."
+            f"Dataflow reachability from {source_var} to {sink_var}: {res.get('reachable', False)} (hops: {path_len})."
         ),
     )
 
@@ -3036,10 +3151,7 @@ def solve_global_type_lattice(
             recovered_struct_layouts=layouts,
             iterations=int(res.get("iterations", 0)),
             binary_path=str(res.get("binary_path", binary_path)),
-            message=(
-                f"Solved global type lattice: {len(resolved)} variables and "
-                f"{len(layouts)} struct layouts."
-            ),
+            message=(f"Solved global type lattice: {len(resolved)} variables and {len(layouts)} struct layouts."),
         )
 
     from superghidra.diff.benchmark_and_nextgen_engine import GlobalTypeLatticeSolver, LatticeType
@@ -3064,8 +3176,6 @@ def solve_global_type_lattice(
             f"and {len(res.get('recovered_struct_layouts', {}))} struct layouts."
         ),
     )
-
-
 
 
 @mcp_error_handler
@@ -3172,7 +3282,6 @@ def trace_native_values(
     )
 
 
-
 def _resolve_safe_dir_path(
     path: str | Path,
     must_exist: bool = False,
@@ -3205,20 +3314,24 @@ def _resolve_safe_dir_path(
                 val = os.environ.get(env_var)
                 if val:
                     sys_dirs.append(Path(val).resolve())
-            sys_dirs.extend([
-                Path(r"C:\Windows").resolve(),
-                Path(r"C:\Program Files").resolve(),
-                Path(r"C:\Program Files (x86)").resolve(),
-            ])
+            sys_dirs.extend(
+                [
+                    Path(r"C:\Windows").resolve(),
+                    Path(r"C:\Program Files").resolve(),
+                    Path(r"C:\Program Files (x86)").resolve(),
+                ]
+            )
         else:
-            sys_dirs.extend([
-                Path("/etc").resolve(),
-                Path("/usr").resolve(),
-                Path("/bin").resolve(),
-                Path("/sbin").resolve(),
-                Path("/System").resolve(),
-                Path("/Library").resolve(),
-            ])
+            sys_dirs.extend(
+                [
+                    Path("/etc").resolve(),
+                    Path("/usr").resolve(),
+                    Path("/bin").resolve(),
+                    Path("/sbin").resolve(),
+                    Path("/System").resolve(),
+                    Path("/Library").resolve(),
+                ]
+            )
 
         for sd in sys_dirs:
             if str(p).lower().startswith(str(sd).lower()):

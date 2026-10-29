@@ -52,10 +52,64 @@ _LOCK_FILE_SUFFIXES = (".lock", ".lock~", ".ulock")
 
 # Merge outcomes that are final: the entry is not replayed by later merges.
 RESOLVED_STATUSES = frozenset(
-    {"applied", "already_applied", "overwritten", "queued", "ignored", "discarded", "resolved_both", "combined"}
+    {
+        "applied",
+        "already_applied",
+        "overwritten",
+        "queued",
+        "ignored",
+        "discarded",
+        "resolved_both",
+        "combined",
+        "resolved_by_evidence",
+    }
 )
 
 _merge_lock = threading.Lock()
+
+
+def _epistemic_rank(
+    provenance: str | None = None,
+    epistemic_status: str | None = None,
+    symbol_name: str | None = None,
+) -> int:
+    """Returns numerical rank (0-4) for epistemic evidence strength:
+    4: smt_proven, imported (DWARF/PDB/FLIRT), or observed bytes
+    3: user_defined (committed overlay or human annotation)
+    2: analysis / inferred with verified obligation
+    1: analysis / inferred heuristic
+    0: default / unknown / auto-generated compiler names (FUN_*, local_*, DAT_*)
+    """
+    if provenance:
+        p = str(provenance).lower()
+        if any(k in p for k in ("smt_proven", "imported", "dwarf", "pdb")):
+            return 4
+        if "user_defined" in p or "human" in p:
+            return 3
+        if "verified" in p:
+            return 2
+        if "analysis" in p or "inferred" in p:
+            return 1
+        if "default" in p or "unknown" in p:
+            return 0
+
+    if epistemic_status:
+        s = str(epistemic_status).lower()
+        if "observed" in s:
+            return 4
+        if "inferred" in s:
+            return 1
+        if "unknown" in s:
+            return 0
+
+    if symbol_name:
+        import re
+
+        if re.match(r"^(FUN_[0-9a-fA-F]+|local_[0-9a-fA-F]+|uVar\d+|DAT_[0-9a-fA-F]+|param_\d+)$", symbol_name):
+            return 0
+        return 1
+
+    return 0
 
 
 class ProjectLockedError(RuntimeError):
@@ -166,13 +220,7 @@ def load_merge_state(fork_dir: Path) -> dict[str, Any]:
     state.setdefault("resolved", {})
     state.setdefault("merges", [])
     state.setdefault("conflicts", {})
-    state.setdefault("conflicts", {})
     return state
-
-
-def save_merge_state(fork_dir: Path, state: dict[str, Any]) -> None:
-    state.setdefault("conflicts", {})
-    _write_json(fork_dir / MERGE_STATE_FILE, state)
 
 
 def save_merge_state(fork_dir: Path, state: dict[str, Any]) -> None:
@@ -335,9 +383,7 @@ def create_fork(
         )
 
     label = _sanitize_label(label)
-    fork_id = "-".join(
-        part for part in (time.strftime("%Y%m%d-%H%M%S"), label, uuid.uuid4().hex[:6]) if part
-    )
+    fork_id = "-".join(part for part in (time.strftime("%Y%m%d-%H%M%S"), label, uuid.uuid4().hex[:6]) if part)
     fork_dir = forks_root(parent.pyghidra_mcp_dir) / fork_id
     fork_dir.mkdir(parents=True)
     name = parent.project_name
@@ -355,8 +401,7 @@ def create_fork(
         raise
 
     legacy_parent = (
-        parent.pyghidra_mcp_dir.name.endswith("-pyghidra-mcp")
-        or parent.pyghidra_mcp_dir.name == "pyghidra-mcp"
+        parent.pyghidra_mcp_dir.name.endswith("-pyghidra-mcp") or parent.pyghidra_mcp_dir.name == "pyghidra-mcp"
     )
     suffix = "-pyghidra-mcp" if legacy_parent else "-superghidra-mcp"
     state_dir = fork_dir / f"{name}{suffix}"
@@ -407,20 +452,14 @@ def find_reusable_fork(parent: ProjectSpec, label: str | None = None) -> ForkSes
     # 1. First priority: stopped fork matching label with pending edits
     if cleaned_label:
         pending_candidates = [
-            info
-            for info in stopped
-            if info.get("label") == cleaned_label and info.get("pending_ops", 0) > 0
+            info for info in stopped if info.get("label") == cleaned_label and info.get("pending_ops", 0) > 0
         ]
         if pending_candidates:
             newest = max(pending_candidates, key=lambda info: info.get("created_at", ""))
             return ForkSession.load(Path(newest["path"]))
 
     # 2. Second priority: clean stopped fork (pending_ops == 0 and alive is False)
-    clean_candidates = [
-        info
-        for info in stopped
-        if info.get("pending_ops", 0) == 0
-    ]
+    clean_candidates = [info for info in stopped if info.get("pending_ops", 0) == 0]
     if clean_candidates:
         if cleaned_label:
             same_label = [info for info in clean_candidates if info.get("label") == cleaned_label]
@@ -565,12 +604,14 @@ def prune_forks(
                 shutil.rmtree(fork_path, ignore_errors=True)
 
             total_bytes += size_bytes
-            pruned_summary.append({
-                "fork_id": fid,
-                "reason": reason,
-                "reclaimed_bytes": size_bytes,
-                "path": str(fork_path),
-            })
+            pruned_summary.append(
+                {
+                    "fork_id": fid,
+                    "reason": reason,
+                    "reclaimed_bytes": size_bytes,
+                    "path": str(fork_path),
+                }
+            )
 
     return {
         "scanned": len(all_forks),
@@ -606,6 +647,8 @@ def _reconcile(
     apply: Callable[[], Any],
     dry_run: bool,
     on_conflict: str,
+    op: dict[str, Any] | None = None,
+    decide_with_evidence: bool = False,
 ) -> _Outcome:
     """Three-way decision for one edit: fork base (old), fork result (new), primary now."""
     if _same(current, new):
@@ -616,6 +659,39 @@ def _reconcile(
         apply()
         return _Outcome("applied", target, f"{old!r} -> {new!r}", primary_value=current)
     detail = f"primary has {current!r}; fork changed {old!r} -> {new!r}"
+
+    if on_conflict == "evidence" or decide_with_evidence:
+        fork_prov = op.get("provenance") if op else None
+        fork_status = op.get("epistemic_status") if op else None
+        fork_rank = _epistemic_rank(fork_prov, fork_status, symbol_name=str(new))
+
+        prim_prov = op.get("primary_provenance") if op else None
+        prim_status = op.get("primary_epistemic_status") if op else None
+        prim_rank = _epistemic_rank(prim_prov, prim_status, symbol_name=str(current))
+
+        if fork_rank > prim_rank:
+            if dry_run:
+                return _Outcome(
+                    "would_apply",
+                    target,
+                    f"{detail} (evidence won: fork rank {fork_rank} > primary rank {prim_rank})",
+                    primary_value=current,
+                )
+            apply()
+            return _Outcome(
+                "resolved_by_evidence",
+                target,
+                f"{detail} (evidence won: fork rank {fork_rank} > primary rank {prim_rank})",
+                primary_value=current,
+            )
+        elif prim_rank > fork_rank:
+            return _Outcome(
+                "discarded",
+                target,
+                f"{detail} (evidence held: primary rank {prim_rank} > fork rank {fork_rank})",
+                primary_value=current,
+            )
+
     if on_conflict == "overwrite":
         if dry_run:
             return _Outcome("would_overwrite", target, detail, primary_value=current)
@@ -649,6 +725,53 @@ def _merge_rename_function(
         return _Outcome("applied", target, f"{old!r} -> {new!r}", primary_value=current)
 
     detail = f"primary has {current!r}; fork changed {old!r} -> {new!r}"
+
+    if on_conflict == "evidence" or _kwargs.get("decide_with_evidence"):
+        fork_prov = op.get("provenance")
+        fork_status = op.get("epistemic_status")
+        fork_rank = _epistemic_rank(fork_prov, fork_status, symbol_name=new)
+
+        prim_prov = op.get("primary_provenance")
+        prim_status = op.get("primary_epistemic_status")
+        prim_rank = _epistemic_rank(prim_prov, prim_status, symbol_name=current)
+
+        if fork_rank > prim_rank:
+            if preserve_alias and current:
+                alias_str = f"[Alternative name]: {current}"
+                existing = tools.get_comment(op["address"], "plate")
+                combined_plate = f"{existing}\n\n{alias_str}" if existing else alias_str
+                if not dry_run:
+                    tools.set_comment(op["address"], combined_plate, "plate")
+            if dry_run:
+                return _Outcome(
+                    "would_apply",
+                    target,
+                    f"{detail} (evidence won: fork rank {fork_rank} > primary rank {prim_rank})",
+                    primary_value=current,
+                )
+            tools.rename_function(op["address"], new)
+            return _Outcome(
+                "resolved_by_evidence",
+                target,
+                f"{detail} (evidence won: fork rank {fork_rank} > primary rank {prim_rank})",
+                primary_value=current,
+            )
+        elif prim_rank > fork_rank:
+            if preserve_alias and new:
+                alias_str = (
+                    f"[Alternative name from fork {fork_id}]: {new}" if fork_id else f"[Alternative name]: {new}"
+                )
+                existing = tools.get_comment(op["address"], "plate")
+                combined_plate = f"{existing}\n\n{alias_str}" if existing else alias_str
+                if not dry_run:
+                    tools.set_comment(op["address"], combined_plate, "plate")
+            return _Outcome(
+                "discarded",
+                target,
+                f"{detail} (evidence held: primary rank {prim_rank} > fork rank {fork_rank})",
+                primary_value=current,
+            )
+
     if preserve_alias:
         losing_name = current if on_conflict == "overwrite" else new
         if losing_name:
@@ -699,6 +822,55 @@ def _merge_rename_variable(
         return _Outcome("applied", target, f"{old!r} -> {new!r}", primary_value=current)
 
     detail = f"primary has {current!r}; fork changed {old!r} -> {new!r}"
+
+    if on_conflict == "evidence" or _kwargs.get("decide_with_evidence"):
+        fork_prov = op.get("provenance")
+        fork_status = op.get("epistemic_status")
+        fork_rank = _epistemic_rank(fork_prov, fork_status, symbol_name=new)
+
+        prim_prov = op.get("primary_provenance")
+        prim_status = op.get("primary_epistemic_status")
+        prim_rank = _epistemic_rank(prim_prov, prim_status, symbol_name=current)
+
+        if fork_rank > prim_rank:
+            if preserve_alias and current:
+                alias_str = f"[Alternative variable name]: {current}"
+                existing = tools.get_comment(op["function_address"], "plate")
+                combined_plate = f"{existing}\n\n{alias_str}" if existing else alias_str
+                if not dry_run:
+                    tools.set_comment(op["function_address"], combined_plate, "plate")
+            if dry_run:
+                return _Outcome(
+                    "would_apply",
+                    target,
+                    f"{detail} (evidence won: fork rank {fork_rank} > primary rank {prim_rank})",
+                    primary_value=current,
+                )
+            tools.rename_variable(op["function_address"], current, new)
+            return _Outcome(
+                "resolved_by_evidence",
+                target,
+                f"{detail} (evidence won: fork rank {fork_rank} > primary rank {prim_rank})",
+                primary_value=current,
+            )
+        elif prim_rank > fork_rank:
+            if preserve_alias and new:
+                alias_str = (
+                    f"[Alternative variable name from fork {fork_id}]: {new}"
+                    if fork_id
+                    else f"[Alternative variable name]: {new}"
+                )
+                existing = tools.get_comment(op["function_address"], "plate")
+                combined_plate = f"{existing}\n\n{alias_str}" if existing else alias_str
+                if not dry_run:
+                    tools.set_comment(op["function_address"], combined_plate, "plate")
+            return _Outcome(
+                "discarded",
+                target,
+                f"{detail} (evidence held: primary rank {prim_rank} > fork rank {fork_rank})",
+                primary_value=current,
+            )
+
     if preserve_alias:
         losing_name = current if on_conflict == "overwrite" else new
         if losing_name:
@@ -835,9 +1007,10 @@ class ForkMerger:
         combine_comments: bool = False,
         preserve_alias: bool = False,
         atomic_by_function: bool = False,
+        decide_with_evidence: bool = False,
     ) -> dict[str, Any]:
-        if on_conflict not in {"skip", "overwrite", "combine"}:
-            raise ValueError("on_conflict must be 'skip', 'overwrite', or 'combine'")
+        if on_conflict not in {"skip", "overwrite", "combine", "evidence"}:
+            raise ValueError("on_conflict must be 'skip', 'overwrite', 'combine', or 'evidence'")
 
         fork_dir = resolve_fork_dir(self.context.pyghidra_mcp_dir, fork_id)
         with _merge_lock:
@@ -859,7 +1032,7 @@ class ForkMerger:
                     key = (op.get("binary", ""), fn_addr) if fn_addr is not None else f"__seq_{op['seq']}"
                     groups.setdefault(key, []).append(op)
 
-                for group_key, group_ops in groups.items():
+                for _group_key, group_ops in groups.items():
                     has_conflict = False
                     test_outcomes: dict[int, _Outcome] = {}
                     if on_conflict != "overwrite":
@@ -871,6 +1044,7 @@ class ForkMerger:
                                 combine_comments=combine_comments,
                                 preserve_alias=preserve_alias,
                                 fork_id=fork_id,
+                                decide_with_evidence=decide_with_evidence,
                             )
                             test_outcomes[op["seq"]] = test_out
                             if test_out.status == "conflict":
@@ -923,6 +1097,7 @@ class ForkMerger:
                                 combine_comments=combine_comments,
                                 preserve_alias=preserve_alias,
                                 fork_id=fork_id,
+                                decide_with_evidence=decide_with_evidence,
                             )
                             entries.append(
                                 {
@@ -957,6 +1132,7 @@ class ForkMerger:
                         combine_comments=combine_comments,
                         preserve_alias=preserve_alias,
                         fork_id=fork_id,
+                        decide_with_evidence=decide_with_evidence,
                     )
                     entries.append(
                         {
@@ -1033,6 +1209,7 @@ class ForkMerger:
         combine_comments: bool = False,
         preserve_alias: bool = False,
         fork_id: str = "",
+        decide_with_evidence: bool = False,
     ) -> _Outcome:
         kind = op.get("op")
         if kind == "delete_project_binary":
@@ -1065,6 +1242,7 @@ class ForkMerger:
                     combine_comments=combine_comments,
                     preserve_alias=preserve_alias,
                     fork_id=fork_id,
+                    decide_with_evidence=decide_with_evidence,
                 )
             )
         except Exception as e:
@@ -1136,8 +1314,7 @@ def session_info(context: Any) -> dict[str, Any] | None:
         "project": project,
         "pending_fork_ops": pending,
         "hint": (
-            f"{pending} edit(s) from other sessions' forks await merging: "
-            "see list_forks, then merge_fork."
+            f"{pending} edit(s) from other sessions' forks await merging: see list_forks, then merge_fork."
             if pending
             else None
         ),
@@ -1182,8 +1359,8 @@ def resolve_conflict(
     Returns:
         Outcome dict with resolution details.
     """
-    if keep not in {"primary", "fork", "both"}:
-        raise ValueError(f"keep must be 'primary', 'fork', or 'both', got {keep!r}")
+    if keep not in {"primary", "fork", "both", "evidence"}:
+        raise ValueError(f"keep must be 'primary', 'fork', 'both', or 'evidence', got {keep!r}")
 
     if hasattr(target_or_dir, "pyghidra_mcp_dir"):
         context = context or target_or_dir
@@ -1214,9 +1391,7 @@ def resolve_conflict(
 
         elif keep == "fork":
             if merger is not None:
-                merger_outcome = merger._merge_one(
-                    op, dry_run=False, on_conflict="overwrite", fork_id=fork_id
-                )
+                merger_outcome = merger._merge_one(op, dry_run=False, on_conflict="overwrite", fork_id=fork_id)
                 status_val = merger_outcome.status if merger_outcome.status in RESOLVED_STATUSES else "applied"
                 target_val = merger_outcome.target
                 detail_val = merger_outcome.detail
@@ -1230,7 +1405,7 @@ def resolve_conflict(
 
                         active_tools = GhidraTools(program_info)
                     except Exception:
-                        raise ValueError("Could not instantiate GhidraTools for context")
+                        raise ValueError("Could not instantiate GhidraTools for context") from None
                 else:
                     active_tools = tools(program_info) if callable(tools) else tools
                 handler = _PROGRAM_EDIT_HANDLERS.get(str(op.get("op")))
@@ -1256,6 +1431,62 @@ def resolve_conflict(
             resolved[str(seq)] = status_val
             conflicts.pop(str(seq), None)
 
+        elif keep == "evidence":
+            fork_prov = op.get("provenance")
+            fork_status = op.get("epistemic_status")
+            fork_rank = _epistemic_rank(fork_prov, fork_status, symbol_name=str(op.get("new")))
+
+            active_tools = None
+            if merger is not None:
+                program_info = merger.context.get_program_info(op["binary"])
+                active_tools = merger.tools_factory(program_info)
+            elif context is not None:
+                program_info = context.get_program_info(op["binary"])
+                if tools is None:
+                    try:
+                        from pyghidra_mcp.tools import GhidraTools
+
+                        active_tools = GhidraTools(program_info)
+                    except Exception:
+                        pass
+                else:
+                    active_tools = tools(program_info) if callable(tools) else tools
+            else:
+                active_tools = tools
+
+            current_val = None
+            if active_tools is not None:
+                try:
+                    if op.get("op") == "rename_function":
+                        fn = active_tools.find_function(op["address"])
+                        current_val = str(fn.getName())
+                    elif op.get("op") == "rename_variable":
+                        _f, _k, var = active_tools.find_variable(op["function_address"], names=(op["old"], op["new"]))
+                        current_val = str(var.getName())
+                except Exception:
+                    pass
+
+            prim_prov = op.get("primary_provenance")
+            prim_status = op.get("primary_epistemic_status")
+            prim_rank = _epistemic_rank(prim_prov, prim_status, symbol_name=current_val)
+
+            if fork_rank >= prim_rank and fork_rank > 0:
+                handler = _PROGRAM_EDIT_HANDLERS.get(str(op.get("op")))
+                if handler and active_tools is not None:
+                    h_out = handler(active_tools, op, False, "overwrite", fork_id=fork_id)
+                    status_val = "resolved_by_evidence"
+                    target_val = h_out.target
+                    detail_val = f"Fork evidence rank {fork_rank} beat primary rank {prim_rank}"
+                else:
+                    status_val = "applied"
+                    detail_val = "Applied by evidence"
+            else:
+                status_val = "discarded"
+                detail_val = f"Discarded: primary evidence rank {prim_rank} beat fork rank {fork_rank}"
+
+            resolved[str(seq)] = status_val
+            conflicts.pop(str(seq), None)
+
         elif keep == "both":
             if merger is not None:
                 program_info = merger.context.get_program_info(op["binary"])
@@ -1270,14 +1501,20 @@ def resolve_conflict(
 
                         active_tools = GhidraTools(program_info)
                     except Exception:
-                        raise ValueError("Could not instantiate GhidraTools for context")
+                        raise ValueError("Could not instantiate GhidraTools for context") from None
                 else:
                     active_tools = tools(program_info) if callable(tools) else tools
-                runner = lambda fn: fn()
+
+                def runner(fn):
+                    return fn()
+
                 save_ctx = context
             elif tools is not None:
                 active_tools = tools
-                runner = lambda fn: fn()
+
+                def runner(fn):
+                    return fn()
+
                 save_ctx = None
             else:
                 raise ValueError("A context, merger, or tools instance is required for keep='both'")
@@ -1296,7 +1533,11 @@ def resolve_conflict(
                 target_val = f"{c_type} comment @ {addr}"
                 detail_val = f"Combined comments: {current_comment!r} and {new_comment!r}"
             elif op_kind in ("rename_function", "rename_variable"):
-                func_addr = op.get("address") if op_kind == "rename_function" else (op.get("function_address") or op.get("address"))
+                func_addr = (
+                    op.get("address")
+                    if op_kind == "rename_function"
+                    else (op.get("function_address") or op.get("address"))
+                )
                 new_name = op["new"]
                 existing_plate = active_tools.get_comment(func_addr, "plate")
                 alias_text = f"[Alternative name from fork {fork_id}]: {new_name}"
@@ -1345,22 +1586,26 @@ def sync_fork(target_or_dir: Path | Any, fork_id: str) -> dict[str, Any]:
         for op in journal:
             s_seq = str(op["seq"])
             if s_seq in resolved:
-                resolved_entries.append({
-                    "seq": op["seq"],
-                    "op": op["op"],
-                    "status": resolved[s_seq],
-                    "binary": op.get("binary", ""),
-                    "target": op.get("address") or op.get("function_address") or "",
-                })
+                resolved_entries.append(
+                    {
+                        "seq": op["seq"],
+                        "op": op["op"],
+                        "status": resolved[s_seq],
+                        "binary": op.get("binary", ""),
+                        "target": op.get("address") or op.get("function_address") or "",
+                    }
+                )
             else:
-                pending_entries.append({
-                    "seq": op["seq"],
-                    "op": op["op"],
-                    "binary": op.get("binary", ""),
-                    "target": op.get("address") or op.get("function_address") or "",
-                    "in_conflict": s_seq in conflicts,
-                    "conflict_detail": conflicts.get(s_seq),
-                })
+                pending_entries.append(
+                    {
+                        "seq": op["seq"],
+                        "op": op["op"],
+                        "binary": op.get("binary", ""),
+                        "target": op.get("address") or op.get("function_address") or "",
+                        "in_conflict": s_seq in conflicts,
+                        "conflict_detail": conflicts.get(s_seq),
+                    }
+                )
 
         return {
             "fork_id": fork_id,
@@ -1387,6 +1632,7 @@ def merge_fork(
     combine_comments: bool = False,
     preserve_alias: bool = False,
     atomic_by_function: bool = False,
+    decide_with_evidence: bool = False,
     run: Callable[[Callable[[], Any]], Any] = lambda fn: fn(),
 ) -> dict[str, Any]:
     """Top-level helper to replay a fork's edits into the primary project."""
@@ -1398,7 +1644,10 @@ def merge_fork(
 
                 tools_factory = GhidraTools
             except Exception:
-                tools_factory = lambda p: None
+
+                def tools_factory(p):
+                    return None
+
         merger = ForkMerger(context, tools_factory=tools_factory, run=run)
         return merger.merge(
             fork_id,
@@ -1408,6 +1657,7 @@ def merge_fork(
             combine_comments=combine_comments,
             preserve_alias=preserve_alias,
             atomic_by_function=atomic_by_function,
+            decide_with_evidence=decide_with_evidence,
         )
     else:
         mcp_dir = Path(getattr(target_or_context, "pyghidra_mcp_dir", target_or_context))
@@ -1423,4 +1673,5 @@ def merge_fork(
             combine_comments=combine_comments,
             preserve_alias=preserve_alias,
             atomic_by_function=atomic_by_function,
+            decide_with_evidence=decide_with_evidence,
         )
