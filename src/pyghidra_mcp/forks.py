@@ -359,19 +359,30 @@ def create_fork(
     total_bytes = sum(get_fork_disk_usage_bytes(Path(f["path"])) for f in existing)
     total_mb = total_bytes / (1024 * 1024)
 
-    if len(existing) >= max_forks or total_mb >= max_fork_disk_mb:
+    # Estimate new fork size based on parent project storage
+    parent_proj_dir = Path(parent.project_directory)
+    est_new_fork_bytes = get_fork_disk_usage_bytes(parent_proj_dir) if parent_proj_dir.is_dir() else 0
+    est_total_mb = (total_bytes + est_new_fork_bytes) / (1024 * 1024)
+
+    if len(existing) >= max_forks or est_total_mb >= max_fork_disk_mb:
         prune_forks(parent.pyghidra_mcp_dir, dry_run=False)
         existing = list_forks(parent.pyghidra_mcp_dir)
         total_bytes = sum(get_fork_disk_usage_bytes(Path(f["path"])) for f in existing)
         total_mb = total_bytes / (1024 * 1024)
+        est_total_mb = (total_bytes + est_new_fork_bytes) / (1024 * 1024)
 
-    while len(existing) >= max_forks or total_mb >= max_fork_disk_mb:
-        dead_forks = [f for f in existing if f.get("alive") is False]
-        if not dead_forks:
+    while len(existing) >= max_forks or est_total_mb >= max_fork_disk_mb:
+        # Only discard dead forks that have NO pending or unmerged edits
+        reclaimable_dead = [
+            f
+            for f in existing
+            if f.get("alive") is False and f.get("pending_ops", 0) == 0 and f.get("unmerged_ops", 0) == 0
+        ]
+        if not reclaimable_dead:
             break
-        oldest_dead = min(dead_forks, key=lambda f: f.get("created_at", ""))
+        oldest_dead = min(reclaimable_dead, key=lambda f: f.get("created_at", ""))
         logger.warning(
-            "Fork quota exceeded (%d forks, %.1f MB >= limit %d forks, %d MB). Discarding oldest dead fork %s.",
+            "Fork quota exceeded (%d forks, %.1f MB >= limit %d forks, %d MB). Discarding oldest clean dead fork %s.",
             len(existing),
             total_mb,
             max_forks,
@@ -382,6 +393,7 @@ def create_fork(
         existing = list_forks(parent.pyghidra_mcp_dir)
         total_bytes = sum(get_fork_disk_usage_bytes(Path(f["path"])) for f in existing)
         total_mb = total_bytes / (1024 * 1024)
+        est_total_mb = (total_bytes + est_new_fork_bytes) / (1024 * 1024)
 
     if len(existing) >= max_forks or total_mb >= max_fork_disk_mb:
         raise RuntimeError(
@@ -1172,10 +1184,15 @@ class ForkMerger:
                 counts[entry["status"]] = counts.get(entry["status"], 0) + 1
 
             if not dry_run:
+                if (
+                    counts.get("applied")
+                    or counts.get("overwritten")
+                    or counts.get("combined")
+                    or counts.get("resolved_by_evidence")
+                ):
+                    self.context.save()
                 state["merges"] = [*state["merges"], {"at": _now_iso(), "counts": counts}][-20:]
                 save_merge_state(fork_dir, state)
-                if counts.get("applied") or counts.get("overwritten") or counts.get("combined"):
-                    self.context.save()
 
         pending_count = sum(1 for op in journal if str(op["seq"]) not in resolved)
         if auto_discard and not dry_run and pending_count == 0:
@@ -1387,6 +1404,11 @@ def resolve_conflict(
         op = next((entry for entry in journal if entry["seq"] == seq), None)
         if op is None:
             raise ValueError(f"Operation with seq={seq} not found in journal for fork '{fork_id}'")
+        if str(seq) not in conflicts:
+            raise ValueError(
+                f"Operation seq={seq} is not an unresolved conflict in fork '{fork_id}' "
+                f"(current status: {resolved.get(str(seq), 'pending')})"
+            )
 
         status_val: str = "applied"
         target_val = op.get("address") or op.get("function_address") or op.get("binary") or ""
@@ -1454,15 +1476,19 @@ def resolve_conflict(
             if merger is not None:
                 program_info = merger.context.get_program_info(op["binary"])
                 active_tools = merger.tools_factory(program_info)
+                runner = merger.run
+                save_ctx = merger.context
             elif context is not None:
                 program_info = context.get_program_info(op["binary"])
+                runner = getattr(context, "run", _default_runner)
+                save_ctx = context
                 if tools is None:
                     try:
                         from pyghidra_mcp.tools import GhidraTools
 
                         active_tools = GhidraTools(program_info)
                     except Exception:
-                        pass
+                        active_tools = None
                 else:
                     active_tools = tools(program_info) if callable(tools) else tools
             else:
@@ -1485,15 +1511,20 @@ def resolve_conflict(
             prim_rank = _epistemic_rank(prim_prov, prim_status, symbol_name=current_val)
 
             if fork_rank >= prim_rank and fork_rank > 0:
+                if active_tools is None:
+                    raise ValueError(
+                        f"Cannot apply fork edit seq={seq} by evidence: "
+                        "active Ghidra tools are not available for primary project"
+                    )
                 handler = _PROGRAM_EDIT_HANDLERS.get(str(op.get("op")))
-                if handler and active_tools is not None:
-                    h_out = handler(active_tools, op, False, "overwrite", fork_id=fork_id)
-                    status_val = "resolved_by_evidence"
-                    target_val = h_out.target
-                    detail_val = f"Fork evidence rank {fork_rank} beat primary rank {prim_rank}"
-                else:
-                    status_val = "applied"
-                    detail_val = "Applied by evidence"
+                if handler is None:
+                    raise ValueError(f"Unsupported journal op '{op.get('op')}'")
+                h_out = runner(lambda: handler(active_tools, op, False, "overwrite", fork_id=fork_id))
+                if save_ctx is not None and hasattr(save_ctx, "save"):
+                    save_ctx.save()
+                status_val = "resolved_by_evidence"
+                target_val = h_out.target
+                detail_val = f"Fork evidence rank {fork_rank} beat primary rank {prim_rank}"
             else:
                 status_val = "discarded"
                 detail_val = f"Discarded: primary evidence rank {prim_rank} beat fork rank {fork_rank}"
@@ -1539,10 +1570,14 @@ def resolve_conflict(
                 c_type = str(op["comment_type"])
                 current_comment = active_tools.get_comment(addr, c_type) if active_tools else None
                 new_comment = op["new"]
+                fork_tag = f"[{fork_id}]: {new_comment}"
                 if current_comment:
-                    combined = f"{current_comment}\n\n[{fork_id}]: {new_comment}"
+                    if fork_tag in current_comment:
+                        combined = current_comment
+                    else:
+                        combined = f"{current_comment}\n\n{fork_tag}"
                 else:
-                    combined = f"[{fork_id}]: {new_comment}"
+                    combined = fork_tag
                 if active_tools:
                     runner(lambda: active_tools.set_comment(addr, combined, c_type))
                 target_val = f"{c_type} comment @ {addr}"
@@ -1556,7 +1591,10 @@ def resolve_conflict(
                 new_name = op["new"]
                 existing_plate = active_tools.get_comment(func_addr, "plate") if active_tools else None
                 alias_text = f"[Alternative name from fork {fork_id}]: {new_name}"
-                combined_plate = f"{existing_plate}\n\n{alias_text}" if existing_plate else alias_text
+                if existing_plate and alias_text in existing_plate:
+                    combined_plate = existing_plate
+                else:
+                    combined_plate = f"{existing_plate}\n\n{alias_text}" if existing_plate else alias_text
                 if active_tools:
                     runner(lambda: active_tools.set_comment(func_addr, combined_plate, "plate"))
                 target_val = f"{op_kind} @ {func_addr}"
