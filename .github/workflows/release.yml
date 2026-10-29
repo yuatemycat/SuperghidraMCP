@@ -48,9 +48,29 @@ jobs:
         run: |
           python -m pytest tests/unit/ tests/test_fork_storage_lifecycle.py tests/test_fork_conflict_resolution.py tests/test_fork_evidence_resolution.py
 
+  wait-for-ci:
+    name: Wait for Full CI Matrix
+    needs: [ci-gate]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Wait for peer CI matrix completion
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python scripts/wait_for_ci.py --commit "${{ github.sha }}" --component all
+
   build-and-publish:
     name: Build and Publish Package
-    needs: [ci-gate]
+    needs: [ci-gate, wait-for-ci]
     runs-on: ubuntu-latest
     permissions:
       id-token: write

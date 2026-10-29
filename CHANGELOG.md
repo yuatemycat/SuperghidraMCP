@@ -5,6 +5,13 @@ All notable changes to SuperghidraMCP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Shared Chroma Index Linking**: Linked parent Chroma embeddings directory read-only via directory junction (Windows NTFS) or symlink (Linux/macOS) during fork creation, avoiding 50–200 MB disk duplication per fork while excluding linked trees from fork storage quotas.
+- **Read-Only Session Fork Suppression**: Prompted informative error when `--read-only` is requested on a locked project rather than duplicating 150+ MB into a fork.
+- **Peer CI Matrix Release Gate**: Added `scripts/wait_for_ci.py` and `wait-for-ci` workflow jobs in `release.yml` and `release-cli.yml` to block PyPI publishing until all concurrent devcontainer matrix runs across Ghidra versions and macOS smoke runs pass.
+
 ## [1.0.3] - 2026-10-29
 
 ### Added

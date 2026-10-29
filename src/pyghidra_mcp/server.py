@@ -270,7 +270,11 @@ def create_project_context(
         )
     except forks.ProjectLockedError as e:
         if read_only:
-            logger.warning("%s Running in read-only mode; starting read-only fork without mutations.", e)
+            raise click.ClickException(
+                f"{e}\nProject is locked by another process. Read-only session skipped creating a fork "
+                "to avoid disk duplication.\nShare the existing server (--transport streamable-http) or rerun "
+                "with --on-project-locked fork to explicitly create a fork."
+            ) from None
         elif on_project_locked != "fork":
             raise click.ClickException(
                 f"{e}\nShare one server between agents (--transport streamable-http), or "

@@ -325,15 +325,23 @@ def _ignore_lock_files(_directory: str, names: list[str]) -> list[str]:
 
 
 def get_fork_disk_usage_bytes(fork_dir: Path) -> int:
-    """Calculate total disk usage of a fork directory in bytes."""
+    """Calculate total disk usage of a fork directory in bytes, ignoring shared links/junctions."""
     size_bytes = 0
     try:
         for p in fork_dir.rglob("*"):
-            if p.is_file():
-                try:
+            try:
+                # Do not count files inside shared symlinks or directory junctions
+                is_linked = any(
+                    part.is_symlink() or (hasattr(part, "is_junction") and part.is_junction())
+                    for part in p.parents
+                    if part != fork_dir
+                )
+                if is_linked or p.is_symlink() or (hasattr(p, "is_junction") and p.is_junction()):
+                    continue
+                if p.is_file():
                     size_bytes += p.stat().st_size
-                except OSError:
-                    pass
+            except OSError:
+                pass
     except OSError:
         pass
     return size_bytes
@@ -359,12 +367,9 @@ def create_fork(
     total_bytes = sum(get_fork_disk_usage_bytes(Path(f["path"])) for f in existing)
     total_mb = total_bytes / (1024 * 1024)
 
-    # Estimate new fork size based on project .rep and chromadb storage
+    # Estimate new fork size based on project .rep storage (Chroma index is shared read-only)
     rep_dir = Path(parent.project_directory) / f"{parent.project_name}.rep"
     est_new_fork_bytes = get_fork_disk_usage_bytes(rep_dir) if rep_dir.is_dir() else 0
-    chroma_dir = Path(parent.pyghidra_mcp_dir) / "chromadb"
-    if seed_index and chroma_dir.is_dir():
-        est_new_fork_bytes += get_fork_disk_usage_bytes(chroma_dir)
     est_total_mb = (total_bytes + est_new_fork_bytes) / (1024 * 1024)
 
     if len(existing) >= max_forks or est_total_mb >= max_fork_disk_mb:
@@ -431,14 +436,23 @@ def create_fork(
     state_dir.mkdir()
     source_index = parent.pyghidra_mcp_dir / "chromadb"
     if seed_index and source_index.is_dir():
-        # Reusing the primary's completed code index saves re-decompiling every
-        # function. A torn copy is detected when the fork opens it, and the
-        # caller retries with seed_index=False.
+        # Share the parent's completed code index read-only via directory junction / symlink
+        # instead of duplicating tens or hundreds of megabytes on disk.
+        target_chroma = state_dir / "chromadb"
         try:
-            shutil.copytree(source_index, state_dir / "chromadb")
-        except Exception:
-            logger.warning("Could not seed fork index from %s; it will be rebuilt.", source_index)
-            shutil.rmtree(state_dir / "chromadb", ignore_errors=True)
+            if os.name == "nt":
+                import _winapi
+
+                _winapi.CreateJunction(str(source_index.absolute()), str(target_chroma.absolute()))
+            else:
+                target_chroma.symlink_to(source_index.resolve(), target_is_directory=True)
+        except Exception as exc:
+            logger.debug("Could not link shared index (%s), attempting copy fallback.", exc)
+            try:
+                shutil.copytree(source_index, target_chroma)
+            except Exception:
+                logger.warning("Could not seed fork index from %s; it will be rebuilt.", source_index)
+                shutil.rmtree(target_chroma, ignore_errors=True)
 
     actual_fork_bytes = get_fork_disk_usage_bytes(fork_dir)
     actual_total_mb = (total_bytes + actual_fork_bytes) / (1024 * 1024)

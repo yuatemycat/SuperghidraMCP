@@ -552,3 +552,11 @@ def test_prune_forks_reclaims_dead_merged_and_expired(tmp_path):
     assert res["scanned"] >= 1
     assert any(p["fork_id"] == fork_a.fork_id for p in res["pruned"])
     assert not fork_a.fork_dir.exists()
+
+
+def test_create_project_context_read_only_skips_fork_when_locked(tmp_path, monkeypatch):
+    parent = _make_parent_project(tmp_path)
+    monkeypatch.setattr(server, "PyGhidraContext", Mock(side_effect=forks.ProjectLockedError("locked")))
+
+    with pytest.raises(click.ClickException, match="skipped creating a fork"):
+        server.create_project_context(project_spec=parent, read_only=True, **_context_kwargs())

@@ -46,9 +46,29 @@ jobs:
         run: |
           python -m pytest tests/unit/
 
+  wait-for-ci-cli:
+    name: Wait for Full CLI CI Matrix
+    needs: [ci-gate-cli]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Wait for peer CLI CI matrix completion
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python scripts/wait_for_ci.py --commit "${{ github.sha }}" --component cli
+
   build-and-publish:
     name: Build and Publish CLI Package
-    needs: [ci-gate-cli]
+    needs: [ci-gate-cli, wait-for-ci-cli]
     runs-on: ubuntu-latest
     permissions:
       id-token: write
