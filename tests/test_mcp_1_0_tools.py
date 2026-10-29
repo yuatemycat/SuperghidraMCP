@@ -15,7 +15,6 @@ import tempfile
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -29,15 +28,13 @@ except ImportError:
 
     @asynccontextmanager
     async def InMemoryTransport(server):
-        async with create_client_server_memory_streams() as (client_streams, server_streams):
+        lowlevel = getattr(server, "_lowlevel_server", getattr(server, "_mcp_server", server))
+        async with create_client_server_memory_streams() as ((client_read, client_write), (server_read, server_write)):
             async with anyio.create_task_group() as tg:
-                tg.start_soon(
-                    lambda: server._lowlevel_server.run(
-                        server_streams[0], server_streams[1], server._lowlevel_server.create_initialization_options()
-                    )
-                )
-                yield client_streams
+                tg.start_soon(lambda: lowlevel.run(server_read, server_write, lowlevel.create_initialization_options()))
+                yield client_read, client_write
                 tg.cancel_scope.cancel()
+
 
 from pyghidra_mcp import mcp_tools, server
 from pyghidra_mcp.models import (
@@ -78,8 +75,8 @@ async def test_inspect_analysis_view_schema():
     tool = next((t for t in tools if t.name == "inspect_analysis_view"), None)
     assert tool is not None, "inspect_analysis_view tool not listed by server"
 
-    props = tool.input_schema.get("properties", {})
-    required = tool.input_schema.get("required", [])
+    props = (getattr(tool, "input_schema", None) or getattr(tool, "inputSchema", {})).get("properties", {})
+    required = (getattr(tool, "input_schema", None) or getattr(tool, "inputSchema", {})).get("required", [])
 
     assert "parent_evidence_id" in props
     assert "parent_evidence_id" in required
@@ -99,8 +96,8 @@ async def test_trace_native_values_schema():
     tool = next((t for t in tools if t.name == "trace_native_values"), None)
     assert tool is not None, "trace_native_values tool not listed by server"
 
-    props = tool.input_schema.get("properties", {})
-    required = tool.input_schema.get("required", [])
+    props = (getattr(tool, "input_schema", None) or getattr(tool, "inputSchema", {})).get("properties", {})
+    required = (getattr(tool, "input_schema", None) or getattr(tool, "inputSchema", {})).get("required", [])
 
     assert "binary_path" in props
     assert "binary_path" in required
@@ -119,8 +116,8 @@ async def test_decompile_all_schema():
     tool = next((t for t in tools if t.name == "decompile_all"), None)
     assert tool is not None, "decompile_all tool not listed by server"
 
-    props = tool.input_schema.get("properties", {})
-    required = tool.input_schema.get("required", [])
+    props = (getattr(tool, "input_schema", None) or getattr(tool, "inputSchema", {})).get("properties", {})
+    required = (getattr(tool, "input_schema", None) or getattr(tool, "inputSchema", {})).get("required", [])
 
     assert "binary_path" in props
     assert "binary_path" in required
@@ -143,8 +140,8 @@ async def test_apple_dispatch_schema():
     tool = next((t for t in tools if t.name == "apple_dispatch"), None)
     assert tool is not None, "apple_dispatch tool not listed by server"
 
-    props = tool.input_schema.get("properties", {})
-    required = tool.input_schema.get("required", [])
+    props = (getattr(tool, "input_schema", None) or getattr(tool, "inputSchema", {})).get("properties", {})
+    required = (getattr(tool, "input_schema", None) or getattr(tool, "inputSchema", {})).get("required", [])
 
     assert "binary_path" in props
     assert "binary_path" in required
@@ -161,8 +158,8 @@ async def test_il2cpp_recover_schema():
     tool = next((t for t in tools if t.name == "il2cpp_recover"), None)
     assert tool is not None, "il2cpp_recover tool not listed by server"
 
-    props = tool.input_schema.get("properties", {})
-    required = tool.input_schema.get("required", [])
+    props = (getattr(tool, "input_schema", None) or getattr(tool, "inputSchema", {})).get("properties", {})
+    required = (getattr(tool, "input_schema", None) or getattr(tool, "inputSchema", {})).get("required", [])
 
     assert "global_metadata_dat_path" in props
     assert "global_metadata_dat_path" in required
@@ -176,8 +173,8 @@ async def test_crate_audit_schema():
     tool = next((t for t in tools if t.name == "crate_audit"), None)
     assert tool is not None, "crate_audit tool not listed by server"
 
-    props = tool.input_schema.get("properties", {})
-    required = tool.input_schema.get("required", [])
+    props = (getattr(tool, "input_schema", None) or getattr(tool, "inputSchema", {})).get("properties", {})
+    required = (getattr(tool, "input_schema", None) or getattr(tool, "inputSchema", {})).get("required", [])
 
     assert "binary_path" in props
     assert "binary_path" in required
@@ -288,6 +285,7 @@ def test_inspect_analysis_view_cache_miss_empty():
 
 def test_trace_native_values_invocation():
     """Verify trace_native_values returns TraceNativeValuesResult with graph stats."""
+
     @dataclass
     class FakeTraceReport:
         nodes: list = field(default_factory=lambda: [{"id": "n1"}, {"id": "n2"}])
@@ -385,16 +383,19 @@ def test_decompile_all_invocation():
 
 def test_apple_dispatch_invocation():
     """Verify apple_dispatch returns AppleDispatchResult with runtime counts."""
+
     @dataclass
     class FakeAppleReport:
         arch: str = "arm64"
         bits: int = 64
         image_base: int = 0x100000000
-        counts: dict = field(default_factory=lambda: {
-            "objc_classes": 12,
-            "swift5_types": 4,
-            "chained_fixups": 88,
-        })
+        counts: dict = field(
+            default_factory=lambda: {
+                "objc_classes": 12,
+                "swift5_types": 4,
+                "chained_fixups": 88,
+            }
+        )
         limitations: list = field(default_factory=list)
         epistemic_status: str = "observed"
 
@@ -436,15 +437,18 @@ def test_apple_dispatch_invocation():
 
 def test_il2cpp_recover_invocation():
     """Verify il2cpp_recover returns Il2CppRecoverResult with Unity assemblies & types."""
+
     @dataclass
     class FakeIl2CppReport:
         is_valid: bool = True
         version: int = 29
-        counts: dict = field(default_factory=lambda: {
-            "assemblies": 5,
-            "types": 42,
-            "methods": 120,
-        })
+        counts: dict = field(
+            default_factory=lambda: {
+                "assemblies": 5,
+                "types": 42,
+                "methods": 120,
+            }
+        )
         limitations: list = field(default_factory=list)
         epistemic_status: str = "observed"
 
@@ -484,6 +488,7 @@ def test_il2cpp_recover_invocation():
 
 def test_crate_audit_invocation():
     """Verify crate_audit returns CrateAuditResult with Rust and Go summaries."""
+
     @dataclass
     class FakeRustGoReport:
         binary_format: str = "ELF"
@@ -548,7 +553,7 @@ async def test_mcp_protocol_call_inspect_analysis_view():
                 {"parent_evidence_id": "ev_session_test", "facet": "compilable_c"},
             )
 
-    assert result.is_error is False
+    assert (getattr(result, "is_error", None) or getattr(result, "isError", None)) is False
     data = json.loads(result.content[0].text)
     assert data["status"] == "ok"
     assert data["parent_evidence_id"] == "ev_session_test"
@@ -568,5 +573,5 @@ async def test_mcp_protocol_call_trace_native_values_error():
                 {"binary_path": "/invalid/missing/binary.so", "procedure": "main"},
             )
 
-    assert result.is_error is True
+    assert (getattr(result, "is_error", None) or getattr(result, "isError", None)) is True
     assert "not exist" in result.content[0].text.lower() or "error" in result.content[0].text.lower()

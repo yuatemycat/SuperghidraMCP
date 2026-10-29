@@ -1,9 +1,9 @@
 """
 Unit tests for Read-Only session mode and CLI quota flags.
 """
-from pathlib import Path
+
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import pytest
 from click.testing import CliRunner

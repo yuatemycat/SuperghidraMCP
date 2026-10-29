@@ -12,9 +12,7 @@ def _make_mock_symbol(name, address="0x1000", qualified_name=None):
     sym = Mock()
     sym.name = name
     qualified = qualified_name or name
-    sym.getName.side_effect = lambda include_namespace=False: (
-        qualified if include_namespace else name
-    )
+    sym.getName.side_effect = lambda include_namespace=False: qualified if include_namespace else name
     sym.getAddress.return_value = address
     sym.getSymbolType.return_value = "Function"
     sym.getParentNamespace.return_value = "Global"

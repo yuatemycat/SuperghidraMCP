@@ -35,9 +35,7 @@ class L2SQLiteCache:
 
     def __init__(self, db_path: str | Path | None = None) -> None:
         if db_path is None:
-            cache_dir = os.environ.get("PYGHIDRA_L2_CACHE_DIR") or os.path.join(
-                os.path.expanduser("~"), ".cache"
-            )
+            cache_dir = os.environ.get("PYGHIDRA_L2_CACHE_DIR") or os.path.join(os.path.expanduser("~"), ".cache")
             os.makedirs(cache_dir, exist_ok=True)
             db_path = os.path.join(cache_dir, DEFAULT_L2_CACHE_FILENAME)
         self.db_path = str(db_path)

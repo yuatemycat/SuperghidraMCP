@@ -121,7 +121,7 @@ def install_sigint_shutdown_handler() -> _SigintShutdownHandler:
 async def server_lifespan(server: MCPServer) -> AsyncIterator[MCPContext]:
     """Manage server startup and shutdown lifecycle."""
     try:
-        yield getattr(server, '_pyghidra_context', None)  # type: ignore
+        yield getattr(server, "_pyghidra_context", None)  # type: ignore
     finally:
         # pyghidra_context.close()
         pass
@@ -131,6 +131,9 @@ try:
     mcp = MCPServer("SuperghidraMCP", version=__version__, lifespan=server_lifespan)  # type: ignore
 except TypeError:
     mcp = MCPServer("SuperghidraMCP", lifespan=server_lifespan)  # type: ignore
+
+if hasattr(mcp, "_mcp_server") and getattr(mcp._mcp_server, "version", None) is None:
+    mcp._mcp_server.version = __version__
 
 
 def register_common_tools(server: MCPServer) -> None:
@@ -193,7 +196,6 @@ def register_common_tools(server: MCPServer) -> None:
         server.tool()(mcp_tools.crate_audit)
 
 
-
 def register_gui_tools(server: MCPServer) -> None:
     server.tool()(mcp_tools.list_open_programs)
     server.tool()(mcp_tools.open_program_in_gui)
@@ -230,7 +232,7 @@ def server_instructions(context: object) -> str:
 def _set_server_instructions(mcp: MCPServer, context: object) -> None:
     """Tell clients at initialize time whether this session is a fork."""
     try:
-        lowlevel = getattr(mcp, '_lowlevel_server', None)
+        lowlevel = getattr(mcp, "_lowlevel_server", None)
         if lowlevel is not None:
             lowlevel.instructions = server_instructions(context)
     except Exception:
@@ -310,8 +312,7 @@ def create_project_context(
                 shutil.rmtree(session.fork_dir, ignore_errors=True)
             continue
         logger.warning(
-            "Working on fork %s of %s. Edits are journaled; merge them from the primary "
-            "session with merge_fork.",
+            "Working on fork %s of %s. Edits are journaled; merge them from the primary session with merge_fork.",
             session.fork_id,
             project_spec.gpr_path,
         )
@@ -332,7 +333,7 @@ def init_pyghidra_context(
     no_symbols: bool,
     gdts: list[str],
     program_options_path: str | None,
-    gzfs_path: str | None,
+    gzfs_path: str | None = None,
     threaded: bool,
     max_workers: int,
     wait_for_analysis: bool,
@@ -383,7 +384,7 @@ def init_pyghidra_context(
         no_symbols=no_symbols,
         gdts=gdts,
         program_options=program_options,
-        gzfs_path=gzfs_path,
+        **({} if gzfs_path is None else {"gzfs_path": gzfs_path}),
         threaded=threaded,
         max_workers=max_workers,
         wait_for_analysis=wait_for_analysis,
@@ -427,9 +428,7 @@ def init_pyghidra_context(
         pyghidra_context.analyze_project()
         if wait_for_analysis:
             if transport != "stdio":
-                pyghidra_context.schedule_startup_indexing(
-                    max_binaries=max(len(pyghidra_context.programs), 1)
-                )
+                pyghidra_context.schedule_startup_indexing(max_binaries=max(len(pyghidra_context.programs), 1))
         else:
             for binary_name in imported_programs:
                 pyghidra_context.schedule_indexing(binary_name)
@@ -479,8 +478,7 @@ def run_mcp_server(
         import warnings
 
         warnings.warn(
-            "SSE transport is deprecated per the MCP spec (June 2025). "
-            "Use --transport streamable-http instead.",
+            "SSE transport is deprecated per the MCP spec (June 2025). Use --transport streamable-http instead.",
             DeprecationWarning,
             stacklevel=1,
         )
@@ -511,9 +509,7 @@ def install_gui_console_ctrl_handler(
         )
         return None
 
-    handler_ref = install_console_ctrl_handler(
-        sigint_handler.on_console_interrupt(launcher.interrupt)
-    )
+    handler_ref = install_console_ctrl_handler(sigint_handler.on_console_interrupt(launcher.interrupt))
     logger.info("Ctrl+C handler installed for GUI mode; interrupts now close the GUI cleanly.")
     return handler_ref
 
@@ -886,7 +882,7 @@ def main(
         no_symbols=no_symbols,
         gdts=list(gdt),
         program_options_path=program_options,
-        gzfs_path=gzfs_path,
+        **({} if gzfs_path is None else {"gzfs_path": gzfs_path}),
         threaded=threaded,
         max_workers=max_workers,
         wait_for_analysis=wait_for_analysis,

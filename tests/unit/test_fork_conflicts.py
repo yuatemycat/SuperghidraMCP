@@ -1,5 +1,5 @@
 """Unit tests for fork conflict handling, per-edit resolution, atomic function edits, and sync."""
-import json
+
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -151,9 +151,9 @@ def test_load_and_save_merge_state_tracks_conflicts(tmp_path):
 
 
 def test_merge_records_conflict_metadata(conflict_setup):
-    parent, fork, state, primary, merger = conflict_setup
+    _parent, fork, state, _primary, merger = conflict_setup
     state["functions"]["1000"]["name"] = "primary_changed"
-    op = fork.record("rename_function", BIN, address="1000", old="FUN_1000", new="fork_changed")
+    fork.record("rename_function", BIN, address="1000", old="FUN_1000", new="fork_changed")
 
     res = merger.merge(fork.fork_id)
     assert res["counts"] == {"conflict": 1}
@@ -181,15 +181,13 @@ def test_merge_records_conflict_metadata(conflict_setup):
 
 
 def test_resolve_conflict_keep_primary(conflict_setup):
-    parent, fork, state, primary, merger = conflict_setup
+    parent, fork, state, _primary, merger = conflict_setup
     state["functions"]["1000"]["name"] = "primary_name"
     fork.record("rename_function", BIN, address="1000", old="FUN_1000", new="fork_name")
     merger.merge(fork.fork_id)
 
     # Resolve conflict choosing keep='primary'
-    outcome = forks.resolve_conflict(
-        parent.pyghidra_mcp_dir, fork.fork_id, seq=1, keep="primary"
-    )
+    outcome = forks.resolve_conflict(parent.pyghidra_mcp_dir, fork.fork_id, seq=1, keep="primary")
     assert outcome["status"] == "discarded"
     assert outcome["keep"] == "primary"
 
@@ -208,7 +206,7 @@ def test_resolve_conflict_keep_primary(conflict_setup):
 
 
 def test_resolve_conflict_keep_fork(conflict_setup):
-    parent, fork, state, primary, merger = conflict_setup
+    _parent, fork, state, _primary, merger = conflict_setup
     state["functions"]["1000"]["name"] = "primary_name"
     fork.record("rename_function", BIN, address="1000", old="FUN_1000", new="fork_name")
     merger.merge(fork.fork_id)
@@ -228,7 +226,7 @@ def test_resolve_conflict_keep_fork(conflict_setup):
 
 
 def test_resolve_conflict_keep_both_comments(conflict_setup):
-    parent, fork, state, primary, merger = conflict_setup
+    _parent, fork, state, _primary, merger = conflict_setup
     state["comments"][("1000", "plate")] = "Primary analysis note"
     fork.record(
         "set_comment",
@@ -254,7 +252,7 @@ def test_resolve_conflict_keep_both_comments(conflict_setup):
 
 
 def test_resolve_conflict_keep_both_renames(conflict_setup):
-    parent, fork, state, primary, merger = conflict_setup
+    _parent, fork, state, _primary, merger = conflict_setup
     state["functions"]["1000"]["name"] = "crypto_init"
     fork.record("rename_function", BIN, address="1000", old="FUN_1000", new="ssl_setup")
     merger.merge(fork.fork_id)
@@ -278,7 +276,7 @@ def test_resolve_conflict_keep_both_renames(conflict_setup):
 
 
 def test_automatic_comment_combination_on_conflict(conflict_setup):
-    parent, fork, state, primary, merger = conflict_setup
+    _parent, fork, state, _primary, merger = conflict_setup
     state["comments"][("1000", "eol")] = "Primary comment"
     fork.record("set_comment", BIN, address="1000", comment_type="eol", old=None, new="Fork comment")
 
@@ -293,7 +291,7 @@ def test_automatic_comment_combination_on_conflict(conflict_setup):
 
 
 def test_automatic_comment_combination_on_conflict_combine_mode(conflict_setup):
-    parent, fork, state, primary, merger = conflict_setup
+    _parent, fork, state, _primary, merger = conflict_setup
     state["comments"][("1000", "repeatable")] = "Initial doc"
     fork.record("set_comment", BIN, address="1000", comment_type="repeatable", old=None, new="Extra doc")
 
@@ -307,7 +305,7 @@ def test_automatic_comment_combination_on_conflict_combine_mode(conflict_setup):
 
 
 def test_preserve_alias_on_function_rename_conflict(conflict_setup):
-    parent, fork, state, primary, merger = conflict_setup
+    _parent, fork, state, _primary, merger = conflict_setup
     state["functions"]["1000"]["name"] = "primary_handler"
     fork.record("rename_function", BIN, address="1000", old="FUN_1000", new="fork_handler")
 
@@ -322,7 +320,7 @@ def test_preserve_alias_on_function_rename_conflict(conflict_setup):
 
 
 def test_preserve_alias_on_overwrite(conflict_setup):
-    parent, fork, state, primary, merger = conflict_setup
+    _parent, fork, state, _primary, merger = conflict_setup
     state["functions"]["1000"]["name"] = "primary_handler"
     fork.record("rename_function", BIN, address="1000", old="FUN_1000", new="fork_handler")
 
@@ -341,7 +339,7 @@ def test_preserve_alias_on_overwrite(conflict_setup):
 
 
 def test_atomic_by_function_holds_back_all_edits_on_conflict(conflict_setup):
-    parent, fork, state, primary, merger = conflict_setup
+    _parent, fork, state, _primary, merger = conflict_setup
     # Set up function 1000 with a variable conflict
     state["variables"]["1000"][0]["name"] = "different_name"
 
@@ -393,7 +391,7 @@ def test_atomic_by_function_holds_back_all_edits_on_conflict(conflict_setup):
 
 
 def test_sync_fork_reports_reconciled_state(conflict_setup):
-    parent, fork, state, primary, merger = conflict_setup
+    parent, fork, state, _primary, merger = conflict_setup
     state["functions"]["1000"]["name"] = "diverged"
     fork.record("rename_function", BIN, address="1000", old="FUN_1000", new="clean_name")
     fork.record("rename_function", BIN, address="2000", old="FUN_2000", new="helper_applied")

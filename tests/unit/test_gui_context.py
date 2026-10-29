@@ -98,9 +98,7 @@ def test_refresh_programs_resyncs_existing_program_state():
     context.programs = {"/folder/sample": program_info}
     context._dispose_decompiler = Mock()
     context._init_program_info = Mock()
-    context._get_program_managers = Mock(
-        return_value=[Mock(getAllOpenPrograms=Mock(return_value=[program]))]
-    )
+    context._get_program_managers = Mock(return_value=[Mock(getAllOpenPrograms=Mock(return_value=[program]))])
 
     def sync(info, current_program):
         assert info is program_info

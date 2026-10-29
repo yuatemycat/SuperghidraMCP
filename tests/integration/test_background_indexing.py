@@ -34,9 +34,7 @@ async def test_background_indexing_eventually_enables_string_search(
         async with ClientSession(read, write) as session:
             await session.initialize()
 
-            binary_name = PyGhidraContext._gen_unique_bin_name(
-                server_params_background_indexing.args[-1]
-            )
+            binary_name = PyGhidraContext._gen_unique_bin_name(server_params_background_indexing.args[-1])
 
             strings_indexed = False
             for _ in range(240):

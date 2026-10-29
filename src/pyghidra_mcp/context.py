@@ -77,7 +77,7 @@ class PyGhidraContext(IndexingMixin):
         no_symbols: bool = False,
         gdts: list | None = None,
         program_options: dict | None = None,
-        gzfs_path: str | Path | None | object = _DEFAULT_GZFS,
+        gzfs_path: str | Path | object | None = _DEFAULT_GZFS,
         threaded: bool = True,
         max_workers: int | None = None,
         wait_for_analysis: bool = False,
@@ -144,7 +144,7 @@ class PyGhidraContext(IndexingMixin):
         no_symbols: bool,
         gdts: list | None,
         program_options: dict | None,
-        gzfs_path: str | Path | None | object = _DEFAULT_GZFS,
+        gzfs_path: str | Path | object | None = _DEFAULT_GZFS,
         threaded: bool,
         max_workers: int | None,
         wait_for_analysis: bool,
@@ -160,9 +160,7 @@ class PyGhidraContext(IndexingMixin):
             # falling back to legacy pyghidra-mcp if existing.
             legacy_dir = self.project_path / "pyghidra-mcp"
             canonical_dir = self.project_path / "superghidra-mcp"
-            self.pyghidra_mcp_dir = (
-                legacy_dir if legacy_dir.exists() and not canonical_dir.exists() else canonical_dir
-            )
+            self.pyghidra_mcp_dir = legacy_dir if legacy_dir.exists() and not canonical_dir.exists() else canonical_dir
 
         # From GhidraDiffEngine
         self.force_analysis = force_analysis
@@ -171,17 +169,15 @@ class PyGhidraContext(IndexingMixin):
         self.gdts = gdts if gdts is not None else []
 
         # Symbol configuration
-        self.symbols_path = (
-            Path(symbols_path) if symbols_path else self.pyghidra_mcp_dir / "symbols"
-        )
+        self.symbols_path = Path(symbols_path) if symbols_path else self.pyghidra_mcp_dir / "symbols"
         self.sym_file_path = Path(sym_file_path) if sym_file_path else None
         self.program_options = program_options
         if gzfs_path is _DEFAULT_GZFS:
             self.gzfs_path = self.pyghidra_mcp_dir / "gzfs"
-        elif not gzfs_path:
-            self.gzfs_path = None
-        else:
+        elif isinstance(gzfs_path, (str, Path)):
             self.gzfs_path = Path(gzfs_path)
+        else:
+            self.gzfs_path = None
         if self.gzfs_path is not None:
             self.gzfs_path.mkdir(exist_ok=True, parents=True)
 
@@ -193,14 +189,8 @@ class PyGhidraContext(IndexingMixin):
             logger.warning("--no-threaded flag forcing max_workers to 1")
             self.max_workers = 1
         self._init_indexing_state(self.pyghidra_mcp_dir, threaded=self.threaded)
-        self.executor = (
-            concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers)
-            if self.threaded
-            else None
-        )
-        self.import_executor = (
-            concurrent.futures.ThreadPoolExecutor(max_workers=1) if self.threaded else None
-        )
+        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) if self.threaded else None
+        self.import_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1) if self.threaded else None
         self.wait_for_analysis = wait_for_analysis
 
         self.programs: dict[str, ProgramInfo] = {}
@@ -323,8 +313,7 @@ class PyGhidraContext(IndexingMixin):
                 err_msg = str(e).lower()
                 if "lock" in err_msg or "already in use" in err_msg or "in use" in err_msg:
                     raise ProjectLockedError(
-                        f"Ghidra project '{self.project_name}' in {project_dir_str} is locked by "
-                        f"another process: {e}"
+                        f"Ghidra project '{self.project_name}' in {project_dir_str} is locked by another process: {e}"
                     ) from None
                 raise
         else:
@@ -412,9 +401,7 @@ class PyGhidraContext(IndexingMixin):
         program_info = self.programs.get(program_name)
         if not program_info:
             available_progs = list(self.programs.keys())
-            raise ValueError(
-                f"Binary {program_name} not found. Available binaries: {available_progs}"
-            )
+            raise ValueError(f"Binary {program_name} not found. Available binaries: {available_progs}")
         else:
             logger.info(f"Deleting program: {program_name}")
             try:
@@ -532,9 +519,7 @@ class PyGhidraContext(IndexingMixin):
         if getattr(self, "read_only", False) is True:
             raise ValueError("Session is read-only; mutation operations are disallowed.")
         import_plan = build_import_plan(binary_paths)
-        files_to_import = [
-            (candidate.path, candidate.relative_path) for candidate in import_plan.candidates
-        ]
+        files_to_import = [(candidate.path, candidate.relative_path) for candidate in import_plan.candidates]
 
         for skipped in import_plan.skipped:
             logger.info("Skipping %s: %s", skipped.path, skipped.reason)
@@ -610,10 +595,7 @@ class PyGhidraContext(IndexingMixin):
             self._import_candidates(import_plan.candidates, analyze=True)
 
         queued_paths = [str(candidate.path) for candidate in import_plan.candidates]
-        skipped = [
-            SkippedImportModel(path=str(skipped.path), reason=skipped.reason)
-            for skipped in import_plan.skipped
-        ]
+        skipped = [SkippedImportModel(path=str(skipped.path), reason=skipped.reason) for skipped in import_plan.skipped]
         message = (
             f"Queued {len(queued_paths)} import(s) from {binary_path} in the background."
             if queued_paths
@@ -634,9 +616,7 @@ class PyGhidraContext(IndexingMixin):
         if not program_info:
             # Exact program name not in the list
             available_progs = list(self.programs.keys())
-            raise ValueError(
-                f"Binary {binary_name} not found. Available binaries: {available_progs}"
-            )
+            raise ValueError(f"Binary {binary_name} not found. Available binaries: {available_progs}")
         if not program_info.analysis_complete:
             raise RuntimeError(
                 json.dumps(
@@ -658,9 +638,7 @@ class PyGhidraContext(IndexingMixin):
         if program_info is not None:
             return program_info
 
-        available_prog_names = {
-            Path(prog).name: prog_info for prog, prog_info in self.programs.items()
-        }
+        available_prog_names = {Path(prog).name: prog_info for prog, prog_info in self.programs.items()}
         return available_prog_names.get(binary_name)
 
     def _init_program_info(self, program):
@@ -856,11 +834,7 @@ class PyGhidraContext(IndexingMixin):
         else:
             flat_api = FlatProgramAPI(program)
 
-        if (
-            GhidraProgramUtilities.shouldAskToAnalyze(program)
-            or force_analysis
-            or self.force_analysis
-        ):
+        if GhidraProgramUtilities.shouldAskToAnalyze(program) or force_analysis or self.force_analysis:
             with self._analysis_bundle_host_lock:
                 bundle_host_acquired = False
                 try:
@@ -890,26 +864,20 @@ class PyGhidraContext(IndexingMixin):
                         self.set_analysis_option(program, "Decompiler Parameter ID", True)
 
                 if self.program_options:
-                    analyzer_options = self.program_options.get("program_options", {}).get(
-                        "Analyzers", {}
-                    )
+                    analyzer_options = self.program_options.get("program_options", {}).get("Analyzers", {})
                     for k, v in analyzer_options.items():
                         logger.info(f"Setting prog option:{k} with value:{v}")
                         self.set_analysis_option(program, k, v)
 
                 if self.no_symbols:
-                    logger.warn(
-                        f"Disabling symbols for analysis! --no-symbols flag: {self.no_symbols}"
-                    )
+                    logger.warn(f"Disabling symbols for analysis! --no-symbols flag: {self.no_symbols}")
                     self.set_analysis_option(program, "PDB Universal", False)
 
                 elif self.sym_file_path:
                     # Set the analyzer option directly: ghidrecomp's set_pdb (<= 0.5.9)
                     # reads its path variable before assigning it and always raises.
                     logger.info(f"Setting PDB file: {self.sym_file_path}")
-                    PdbUniversalAnalyzer.setPdbFileOption(
-                        program, File(str(Path(self.sym_file_path).absolute()))
-                    )
+                    PdbUniversalAnalyzer.setPdbFileOption(program, File(str(Path(self.sym_file_path).absolute())))
                 else:
                     logger.info(f"Setting up symbol server at {self.symbols_path}")
                     with contextlib.redirect_stdout(sys.stderr):
@@ -951,10 +919,7 @@ class PyGhidraContext(IndexingMixin):
             try:
                 meta = dict(program.getMetadata())
                 prog_hash = (
-                    meta.get("Executable SHA256")
-                    or meta.get("Executable MD5")
-                    or meta.get("SHA256")
-                    or meta.get("MD5")
+                    meta.get("Executable SHA256") or meta.get("Executable MD5") or meta.get("SHA256") or meta.get("MD5")
                 )
             except Exception:
                 pass
@@ -963,6 +928,7 @@ class PyGhidraContext(IndexingMixin):
                     exe_loc = program.getExecutablePath()
                     if exe_loc and Path(exe_loc).is_file():
                         import hashlib
+
                         prog_hash = hashlib.sha256(Path(exe_loc).read_bytes()).hexdigest()
                 except Exception:
                     pass
@@ -1096,9 +1062,7 @@ class PyGhidraContext(IndexingMixin):
                 # The following is a placeholder for actual symbol loading logic
                 pdb_attr = PdbProgramAttributes(program)
                 if not pdb_attr.pdbLoaded:
-                    logger.warning(
-                        f"PDB not loaded for {program_name}. Manual loading might be required."
-                    )
+                    logger.warning(f"PDB not loaded for {program_name}. Manual loading might be required.")
 
             except Exception as e:
                 logger.error(f"Failed to configure symbols for {program_name}: {e}")

@@ -9,8 +9,9 @@ import pytest
 from pyghidra_mcp import mcp_tools
 
 SUPERGHIDRA = os.environ.get("SUPERGHIDRA_PATH") or str(Path(__file__).resolve().parents[3] / "SuperGhidra")
-pytestmark = pytest.mark.skipif(not Path(SUPERGHIDRA, "binary_loader.py").exists(),
-                                reason="SuperGhidra checkout with binary_loader.py not found")
+pytestmark = pytest.mark.skipif(
+    not Path(SUPERGHIDRA, "binary_loader.py").exists(), reason="SuperGhidra checkout with binary_loader.py not found"
+)
 
 
 @pytest.fixture

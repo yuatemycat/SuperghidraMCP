@@ -228,6 +228,14 @@ def save_merge_state(fork_dir: Path, state: dict[str, Any]) -> None:
     _write_json(fork_dir / MERGE_STATE_FILE, state)
 
 
+def _default_runner(fn: Callable[[], Any]) -> Any:
+    return fn()
+
+
+def _null_tools_factory(p: Any) -> Any:
+    return None
+
+
 def forks_root(pyghidra_mcp_dir: Path) -> Path:
     return Path(pyghidra_mcp_dir) / FORKS_DIRNAME
 
@@ -1362,9 +1370,10 @@ def resolve_conflict(
     if keep not in {"primary", "fork", "both", "evidence"}:
         raise ValueError(f"keep must be 'primary', 'fork', 'both', or 'evidence', got {keep!r}")
 
-    if hasattr(target_or_dir, "pyghidra_mcp_dir"):
+    mcp_dir_attr = getattr(target_or_dir, "pyghidra_mcp_dir", None)
+    if mcp_dir_attr is not None:
         context = context or target_or_dir
-        pyghidra_mcp_dir = target_or_dir.pyghidra_mcp_dir
+        pyghidra_mcp_dir = Path(mcp_dir_attr)
     else:
         pyghidra_mcp_dir = Path(target_or_dir)
 
@@ -1379,9 +1388,14 @@ def resolve_conflict(
         if op is None:
             raise ValueError(f"Operation with seq={seq} not found in journal for fork '{fork_id}'")
 
-        status_val: str
+        status_val: str = "applied"
         target_val = op.get("address") or op.get("function_address") or op.get("binary") or ""
         detail_val: str | None = None
+        active_tools: Any = None
+
+        runner: Callable[[Any], Any] = _default_runner
+
+        save_ctx: Any = None
 
         if keep == "primary":
             status_val = "discarded"
@@ -1491,7 +1505,9 @@ def resolve_conflict(
             if merger is not None:
                 program_info = merger.context.get_program_info(op["binary"])
                 active_tools = merger.tools_factory(program_info)
+
                 runner = merger.run
+
                 save_ctx = merger.context
             elif context is not None:
                 program_info = context.get_program_info(op["binary"])
@@ -1505,15 +1521,13 @@ def resolve_conflict(
                 else:
                     active_tools = tools(program_info) if callable(tools) else tools
 
-                def runner(fn):
-                    return fn()
+                runner = _default_runner
 
                 save_ctx = context
             elif tools is not None:
                 active_tools = tools
 
-                def runner(fn):
-                    return fn()
+                runner = _default_runner
 
                 save_ctx = None
             else:
@@ -1521,28 +1535,30 @@ def resolve_conflict(
 
             op_kind = op.get("op")
             if op_kind == "set_comment":
-                addr = op["address"]
-                c_type = op["comment_type"]
-                current_comment = active_tools.get_comment(addr, c_type)
+                addr = str(op["address"])
+                c_type = str(op["comment_type"])
+                current_comment = active_tools.get_comment(addr, c_type) if active_tools else None
                 new_comment = op["new"]
                 if current_comment:
                     combined = f"{current_comment}\n\n[{fork_id}]: {new_comment}"
                 else:
                     combined = f"[{fork_id}]: {new_comment}"
-                runner(lambda: active_tools.set_comment(addr, combined, c_type))
+                if active_tools:
+                    runner(lambda: active_tools.set_comment(addr, combined, c_type))
                 target_val = f"{c_type} comment @ {addr}"
                 detail_val = f"Combined comments: {current_comment!r} and {new_comment!r}"
             elif op_kind in ("rename_function", "rename_variable"):
-                func_addr = (
+                func_addr = str(
                     op.get("address")
                     if op_kind == "rename_function"
-                    else (op.get("function_address") or op.get("address"))
+                    else (op.get("function_address") or op.get("address") or "")
                 )
                 new_name = op["new"]
-                existing_plate = active_tools.get_comment(func_addr, "plate")
+                existing_plate = active_tools.get_comment(func_addr, "plate") if active_tools else None
                 alias_text = f"[Alternative name from fork {fork_id}]: {new_name}"
                 combined_plate = f"{existing_plate}\n\n{alias_text}" if existing_plate else alias_text
-                runner(lambda: active_tools.set_comment(func_addr, combined_plate, "plate"))
+                if active_tools:
+                    runner(lambda: active_tools.set_comment(func_addr, combined_plate, "plate"))
                 target_val = f"{op_kind} @ {func_addr}"
                 detail_val = f"Kept primary name; preserved fork alias {new_name!r} in plate comment"
             else:
@@ -1569,8 +1585,9 @@ def resolve_conflict(
 
 def sync_fork(target_or_dir: Path | Any, fork_id: str) -> dict[str, Any]:
     """Reconcile and synchronize a fork by marking resolved entries and returning updated primary state."""
-    if hasattr(target_or_dir, "pyghidra_mcp_dir"):
-        pyghidra_mcp_dir = target_or_dir.pyghidra_mcp_dir
+    mcp_dir_attr = getattr(target_or_dir, "pyghidra_mcp_dir", None)
+    if mcp_dir_attr is not None:
+        pyghidra_mcp_dir = Path(mcp_dir_attr)
     else:
         pyghidra_mcp_dir = Path(target_or_dir)
 
@@ -1638,17 +1655,18 @@ def merge_fork(
     """Top-level helper to replay a fork's edits into the primary project."""
     if hasattr(target_or_context, "pyghidra_mcp_dir") and hasattr(target_or_context, "get_program_info"):
         context = target_or_context
+        active_tools_factory: Callable[[Any], Any]
         if tools_factory is None:
             try:
                 from pyghidra_mcp.tools import GhidraTools
 
-                tools_factory = GhidraTools
+                active_tools_factory = GhidraTools
             except Exception:
+                active_tools_factory = _null_tools_factory
+        else:
+            active_tools_factory = tools_factory
 
-                def tools_factory(p):
-                    return None
-
-        merger = ForkMerger(context, tools_factory=tools_factory, run=run)
+        merger = ForkMerger(context, tools_factory=active_tools_factory, run=run)
         return merger.merge(
             fork_id,
             dry_run=dry_run,
@@ -1664,7 +1682,8 @@ def merge_fork(
         from types import SimpleNamespace
 
         dummy_context = SimpleNamespace(pyghidra_mcp_dir=mcp_dir, save=lambda: None)
-        merger = ForkMerger(dummy_context, tools_factory=tools_factory or (lambda p: None), run=run)
+        fallback_factory = tools_factory if tools_factory is not None else _null_tools_factory
+        merger = ForkMerger(dummy_context, tools_factory=fallback_factory, run=run)
         return merger.merge(
             fork_id,
             dry_run=dry_run,

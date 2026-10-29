@@ -50,9 +50,7 @@ def build_import_plan(binary_paths: Iterable[str | Path]) -> ImportPlan:
                     continue
                 allowed, reason = _classify_import_path(candidate, allow_raw_binary=False)
                 if allowed:
-                    candidates.append(
-                        ImportCandidate(candidate, candidate.relative_to(path).parent)
-                    )
+                    candidates.append(ImportCandidate(candidate, candidate.relative_to(path).parent))
                 else:
                     skipped.append(SkippedImport(candidate, reason))
             continue

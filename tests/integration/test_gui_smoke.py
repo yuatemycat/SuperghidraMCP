@@ -42,13 +42,7 @@ async def _wait_for_http_server(
         if not home or not ghidra_version:
             return ""
 
-        app_log = (
-            Path(home)
-            / ".config"
-            / "ghidra"
-            / f"ghidra_{ghidra_version}_PUBLIC"
-            / "application.log"
-        )
+        app_log = Path(home) / ".config" / "ghidra" / f"ghidra_{ghidra_version}_PUBLIC" / "application.log"
         if not app_log.exists():
             return ""
 

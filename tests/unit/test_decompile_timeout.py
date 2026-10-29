@@ -58,9 +58,7 @@ def test_decompile_uses_one_finite_budget_for_pool_and_ghidra(monkeypatch):
     response = tools.decompile_function(function)
 
     assert pool.timeout == DEFAULT_DECOMPILE_TIMEOUT_SECONDS
-    decompiler.decompileFunction.assert_called_once_with(
-        function, DEFAULT_DECOMPILE_TIMEOUT_SECONDS, monitor
-    )
+    decompiler.decompileFunction.assert_called_once_with(function, DEFAULT_DECOMPILE_TIMEOUT_SECONDS, monitor)
     assert response.code == "int entry(void) { return 0; }"
 
 

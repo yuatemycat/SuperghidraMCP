@@ -27,24 +27,18 @@ async def test_list_exports(server_params_shared_object):
             all_exports_list = export_infos.exports
 
             # Test limit
-            response = await session.call_tool(
-                "list_exports", {"binary_name": binary_name, "limit": 1}
-            )
+            response = await session.call_tool("list_exports", {"binary_name": binary_name, "limit": 1})
             export_infos = ExportInfos.model_validate_json(response.content[0].text)
             assert len(export_infos.exports) == 1
 
             # Test offset
-            response = await session.call_tool(
-                "list_exports", {"binary_name": binary_name, "offset": 1, "limit": 1}
-            )
+            response = await session.call_tool("list_exports", {"binary_name": binary_name, "offset": 1, "limit": 1})
             export_infos = ExportInfos.model_validate_json(response.content[0].text)
             assert len(export_infos.exports) == 1
             assert export_infos.exports[0].name == all_exports_list[1].name
 
             # Test query
-            response = await session.call_tool(
-                "list_exports", {"binary_name": binary_name, "query": "shared_func_one"}
-            )
+            response = await session.call_tool("list_exports", {"binary_name": binary_name, "query": "shared_func_one"})
             export_infos = ExportInfos.model_validate_json(response.content[0].text)
             assert len(export_infos.exports) >= 1
             assert "shared_func_one" in export_infos.exports[0].name

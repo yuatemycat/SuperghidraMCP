@@ -517,9 +517,9 @@ def test_diff_binaries_raw_binary_file():
         f_bin.write(elf_bytes)
         bin_path = f_bin.name
 
-    json_funcs = json.dumps([
-        {"func_id": "func_000", "name": "sub_1000", "address": 0x1000, "instructions": ["mov", "ret"]}
-    ])
+    json_funcs = json.dumps(
+        [{"func_id": "func_000", "name": "sub_1000", "address": 0x1000, "instructions": ["mov", "ret"]}]
+    )
 
     try:
         res = mcp_tools.diff_binaries(
@@ -557,18 +557,22 @@ def test_gpu_seed_functions_multi_segment_and_apply():
     block1.isExecute.return_value = True
     block1.getSize.return_value = len(bytes1)
     block1.getStart().getOffset.return_value = 0x100000
+
     def read_block1(start, chunk):
-        chunk[:len(bytes1)] = bytes1
+        chunk[: len(bytes1)] = bytes1
         return len(bytes1)
+
     block1.getBytes.side_effect = read_block1
 
     block2 = MagicMock()
     block2.isExecute.return_value = True
     block2.getSize.return_value = len(bytes2)
     block2.getStart().getOffset.return_value = 0x200000
+
     def read_block2(start, chunk):
-        chunk[:len(bytes2)] = bytes2
+        chunk[: len(bytes2)] = bytes2
         return len(bytes2)
+
     block2.getBytes.side_effect = read_block2
 
     mock_program.getMemory().getBlocks.return_value = [block1, block2]
@@ -597,12 +601,12 @@ def test_cross_reference_apk_jni_binary_dex_and_elf():
     mcp_tools._ensure_superghidra_imported()
     from superghidra.integrations.apk_jni_cross_referencer import APKJNICrossReferencer
 
-    dex_bytes = APKJNICrossReferencer.build_synthetic_dex_bytes([
-        ("com/example/game/NativeBridge", "calculateCombatScore", "(II)I", 0x101)
-    ])
-    elf_bytes = APKJNICrossReferencer.build_synthetic_jni_elf_bytes({
-        "Java_com_example_game_NativeBridge_calculateCombatScore": 0x105000
-    })
+    dex_bytes = APKJNICrossReferencer.build_synthetic_dex_bytes(
+        [("com/example/game/NativeBridge", "calculateCombatScore", "(II)I", 0x101)]
+    )
+    elf_bytes = APKJNICrossReferencer.build_synthetic_jni_elf_bytes(
+        {"Java_com_example_game_NativeBridge_calculateCombatScore": 0x105000}
+    )
 
     with tempfile.NamedTemporaryFile(suffix=".dex", delete=False) as f_dex:
         f_dex.write(dex_bytes)
@@ -650,12 +654,12 @@ def test_migrate_semantic_deltas():
         )
         delta_log.append(evt)
 
-        bin_a = json.dumps([
-            {"func_id": "func_000", "name": "sub_1000", "address": 0x1000, "instructions": ["mov", "add", "ret"]}
-        ])
-        bin_b = json.dumps([
-            {"func_id": "func_b00", "name": "sub_2000", "address": 0x2000, "instructions": ["mov", "add", "ret"]}
-        ])
+        bin_a = json.dumps(
+            [{"func_id": "func_000", "name": "sub_1000", "address": 0x1000, "instructions": ["mov", "add", "ret"]}]
+        )
+        bin_b = json.dumps(
+            [{"func_id": "func_b00", "name": "sub_2000", "address": 0x2000, "instructions": ["mov", "add", "ret"]}]
+        )
 
         res = mcp_tools.migrate_semantic_deltas(
             delta_log_path=log_path,
@@ -685,32 +689,34 @@ def test_migrate_semantic_deltas():
 
 def test_preindex_dwarf_pdb():
     """Verify preindex_dwarf_pdb type and symbol SQLite pre-indexing."""
-    types_json = json.dumps({
-        "canonical_types": [
-            {
-                "type_id": "type_struct_player",
-                "name": "PlayerState",
-                "kind": "struct",
-                "byte_size": 16,
-                "alignment": 4,
-                "members": [
-                    {"name": "health", "type_id": "type_u32", "offset": 0, "size": 4},
-                    {"name": "score", "type_id": "type_u32", "offset": 4, "size": 4},
-                ],
-            }
-        ],
-        "symbols": [
-            {
-                "symbol_id": "sym_g_player",
-                "name": "g_ActivePlayer",
-                "address": 0x204000,
-                "size": 16,
-                "type_id": "type_struct_player",
-                "linkage": "global",
-                "section": ".bss",
-            }
-        ],
-    })
+    types_json = json.dumps(
+        {
+            "canonical_types": [
+                {
+                    "type_id": "type_struct_player",
+                    "name": "PlayerState",
+                    "kind": "struct",
+                    "byte_size": 16,
+                    "alignment": 4,
+                    "members": [
+                        {"name": "health", "type_id": "type_u32", "offset": 0, "size": 4},
+                        {"name": "score", "type_id": "type_u32", "offset": 4, "size": 4},
+                    ],
+                }
+            ],
+            "symbols": [
+                {
+                    "symbol_id": "sym_g_player",
+                    "name": "g_ActivePlayer",
+                    "address": 0x204000,
+                    "size": 16,
+                    "type_id": "type_struct_player",
+                    "linkage": "global",
+                    "section": ".bss",
+                }
+            ],
+        }
+    )
 
     with tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w", encoding="utf-8") as f_in:
         f_in.write(types_json)
@@ -798,5 +804,3 @@ def test_solve_global_type_lattice():
     assert isinstance(res, TypeLatticeResult)
     assert res.status == "ok"
     assert "callee_param0" in res.resolved_variables
-
-

@@ -19,9 +19,7 @@ async def test_list_imports(server_params_shared_object, test_shared_object):
             import_infos = ImportInfos.model_validate_json(response.content[0].text)
             assert len(import_infos.imports) > 0
             assert any("printf" in imp.name for imp in import_infos.imports)
-            assert any(
-                "malloc" in imp.name for imp in import_infos.imports
-            )  # in shared object but not in binary
+            assert any("malloc" in imp.name for imp in import_infos.imports)  # in shared object but not in binary
             all_import_names = [imp.name for imp in import_infos.imports]
 
             # Test limit (filter to a known import for determinism)
@@ -32,17 +30,13 @@ async def test_list_imports(server_params_shared_object, test_shared_object):
             assert len(import_infos.imports) == 1
 
             # Test offset
-            response = await session.call_tool(
-                "list_imports", {"binary_name": binary_name, "offset": 1, "limit": 1}
-            )
+            response = await session.call_tool("list_imports", {"binary_name": binary_name, "offset": 1, "limit": 1})
             import_infos = ImportInfos.model_validate_json(response.content[0].text)
             assert len(import_infos.imports) == 1
             assert import_infos.imports[0].name in all_import_names
 
             # Test query
-            response = await session.call_tool(
-                "list_imports", {"binary_name": binary_name, "query": "printf"}
-            )
+            response = await session.call_tool("list_imports", {"binary_name": binary_name, "query": "printf"})
             import_infos = ImportInfos.model_validate_json(response.content[0].text)
             assert len(import_infos.imports) >= 1
             assert "printf" in import_infos.imports[0].name

@@ -1,10 +1,37 @@
 from unittest.mock import Mock
 
 import pytest
-import tomli
+
+try:
+    import tomllib as tomli
+except ImportError:
+    import tomli
 from click.testing import CliRunner
 from mcp import ClientSession
-from mcp.client._memory import InMemoryTransport
+
+try:
+    from mcp.client._memory import InMemoryTransport
+except ImportError:
+    from contextlib import asynccontextmanager
+
+    import anyio
+    from mcp.shared.memory import create_client_server_memory_streams
+
+    @asynccontextmanager
+    async def InMemoryTransport(server):
+        lowlevel = getattr(server, "_lowlevel_server", getattr(server, "_mcp_server", server))
+        async with create_client_server_memory_streams() as ((client_read, client_write), (server_read, server_write)):
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(
+                    lambda: lowlevel.run(
+                        server_read,
+                        server_write,
+                        lowlevel.create_initialization_options(),
+                    )
+                )
+                yield client_read, client_write
+                tg.cancel_scope.cancel()
+
 
 from pyghidra_mcp import __version__
 from pyghidra_mcp.server import main, mcp
@@ -25,7 +52,8 @@ async def test_server_reports_package_version_to_mcp_clients(monkeypatch):
         async with ClientSession(read, write) as session:
             result = await session.initialize()
 
-    assert result.server_info.version == __version__
+    server_info = getattr(result, "server_info", None) or getattr(result, "serverInfo", None)
+    assert server_info.version == __version__
 
 
 def test_server_cli_reports_package_version():

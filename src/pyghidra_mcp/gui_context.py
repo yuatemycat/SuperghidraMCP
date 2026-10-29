@@ -136,9 +136,7 @@ class GuiPyGhidraContext(IndexingMixin):
                         return project
             time.sleep(interval)
 
-        raise RuntimeError(
-            f"Timed out waiting for Ghidra GUI active project: {project_spec.gpr_path}"
-        )
+        raise RuntimeError(f"Timed out waiting for Ghidra GUI active project: {project_spec.gpr_path}")
 
     def refresh_programs(self) -> None:
         active: dict[str, Any] = {}
@@ -221,9 +219,7 @@ class GuiPyGhidraContext(IndexingMixin):
         else:
             prepared_program = self._prepare_domain_file_for_gui_open(domain_file)
             primary_tool = self._get_primary_program_manager_tool(required=False)
-            program_manager = (
-                primary_tool.getService(ProgramManager) if primary_tool is not None else None
-            )
+            program_manager = primary_tool.getService(ProgramManager) if primary_tool is not None else None
             try:
                 if new_window or program_manager is None or not self._tool_is_visible(primary_tool):
                     self.project.getToolServices().launchDefaultTool(List.of(domain_file))
@@ -358,9 +354,7 @@ class GuiPyGhidraContext(IndexingMixin):
         elif normalized_type == "address":
             address_obj = self._parse_address(program_info.program, target)
         else:
-            raise ValueError(
-                f"Invalid target_type '{target_type}'. Expected one of: ['address', 'function']"
-            )
+            raise ValueError(f"Invalid target_type '{target_type}'. Expected one of: ['address', 'function']")
 
         tool = self._find_tool_for_program(program_info.program)
 
@@ -460,9 +454,7 @@ class GuiPyGhidraContext(IndexingMixin):
             return matches[0]
         if len(matches) > 1:
             paths = [str(domain_file.getPathname()) for domain_file in matches]
-            raise ValueError(
-                f"Binary name '{binary_name}' is ambiguous. Use one of these paths: {paths}"
-            )
+            raise ValueError(f"Binary name '{binary_name}' is ambiguous. Use one of these paths: {paths}")
         raise ValueError(f"Binary {binary_name} not found in project.")
 
     @staticmethod
@@ -559,15 +551,12 @@ class GuiPyGhidraContext(IndexingMixin):
                     opened_info = self.open_program_in_gui(binary_name)
                 except ValueError:
                     raise ValueError(
-                        f"Binary {binary_name} not found. "
-                         f"Available binaries: {self.list_binaries()}"
+                        f"Binary {binary_name} not found. Available binaries: {self.list_binaries()}"
                     ) from None
                 program_info = self.programs.get(opened_info["path"])
                 if program_info is None:
                     # The binary was imported by the user outside our context.
-                    raise ValueError(
-                        f"Binary {binary_name} not imported by the MCP. Restart pyghidra-mcp."
-                    )
+                    raise ValueError(f"Binary {binary_name} not imported by the MCP. Restart pyghidra-mcp.")
         return program_info
 
     def delete_program(self, program_name: str) -> bool:
@@ -609,9 +598,7 @@ class GuiPyGhidraContext(IndexingMixin):
                 imported_programs.append(imported)
         return imported_programs
 
-    def import_binary(
-        self, binary_path: str | Path, relative_path: Path | None = None
-    ) -> str | list[str]:
+    def import_binary(self, binary_path: str | Path, relative_path: Path | None = None) -> str | list[str]:
         from ghidra.app.util.importer import ProgramLoader
         from ghidra.util.task import TaskMonitor
         from java.io import File  # type: ignore
@@ -623,9 +610,7 @@ class GuiPyGhidraContext(IndexingMixin):
             return self.import_binaries([binary_path])
 
         program_name = PyGhidraContext._gen_unique_bin_name(binary_path)
-        folder_path = (
-            "/" if relative_path is None or str(relative_path) == "." else f"/{relative_path}"
-        )
+        folder_path = "/" if relative_path is None or str(relative_path) == "." else f"/{relative_path}"
         expected_path = str(Path(folder_path) / program_name)
 
         try:
@@ -667,10 +652,7 @@ class GuiPyGhidraContext(IndexingMixin):
             future.add_done_callback(self._import_done_callback)
 
         queued_paths = [str(candidate.path) for candidate in import_plan.candidates]
-        skipped = [
-            SkippedImportModel(path=str(skipped.path), reason=skipped.reason)
-            for skipped in import_plan.skipped
-        ]
+        skipped = [SkippedImportModel(path=str(skipped.path), reason=skipped.reason) for skipped in import_plan.skipped]
         message = (
             f"Queued {len(queued_paths)} import(s) from {binary_path} in the background."
             if queued_paths
@@ -795,9 +777,7 @@ class GuiPyGhidraContext(IndexingMixin):
             return matches[0][1]
         if len(matches) > 1:
             paths = [path for path, _program_info in matches]
-            raise ValueError(
-                f"Binary name '{binary_name}' is ambiguous. Use one of these paths: {paths}"
-            )
+            raise ValueError(f"Binary name '{binary_name}' is ambiguous. Use one of these paths: {paths}")
         return None
 
     def _lookup_program_info(self, binary_name: str) -> ProgramInfo | None:

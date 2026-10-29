@@ -47,9 +47,7 @@ def raw_blob_for_import():
 
 
 @pytest.mark.asyncio
-async def test_import_binary(
-    test_binary_for_import, server_params_no_input, find_binary_in_list_response
-):
+async def test_import_binary(test_binary_for_import, server_params_no_input, find_binary_in_list_response):
     """
     Test for the string Hello in the example binary.
     """
@@ -60,9 +58,7 @@ async def test_import_binary(
 
             test_binary_name = PyGhidraContext._gen_unique_bin_name(test_binary_for_import)
 
-            response = await session.call_tool(
-                "import_binary", {"binary_path": test_binary_for_import}
-            )
+            response = await session.call_tool("import_binary", {"binary_path": test_binary_for_import})
 
             content = response.content[0].text
             assert test_binary_for_import in content
@@ -85,18 +81,14 @@ async def test_import_binary(
 
 
 @pytest.mark.asyncio
-async def test_import_raw_binary_single_file(
-    raw_blob_for_import, server_params_no_input, find_binary_in_list_response
-):
+async def test_import_raw_binary_single_file(raw_blob_for_import, server_params_no_input, find_binary_in_list_response):
     async with stdio_client(server_params_no_input) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
 
             raw_binary_name = PyGhidraContext._gen_unique_bin_name(raw_blob_for_import)
 
-            response = await session.call_tool(
-                "import_binary", {"binary_path": raw_blob_for_import}
-            )
+            response = await session.call_tool("import_binary", {"binary_path": raw_blob_for_import})
 
             content = response.content[0].text
             assert raw_blob_for_import in content

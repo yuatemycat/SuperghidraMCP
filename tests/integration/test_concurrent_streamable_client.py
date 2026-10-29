@@ -72,13 +72,11 @@ async def wait_for_collections(base_url: str, test_binary, timeout: int = 120) -
                 program_infos = ProgramInfos(**program_infos_result)
 
                 has_test_binary = any(
-                    PyGhidraContext._gen_unique_bin_name(Path(test_binary)) in pi.name
-                    for pi in program_infos.programs
+                    PyGhidraContext._gen_unique_bin_name(Path(test_binary)) in pi.name for pi in program_infos.programs
                 )
 
                 has_missing = any(
-                    pi.code_indexed is False or pi.strings_indexed is False
-                    for pi in program_infos.programs
+                    pi.code_indexed is False or pi.strings_indexed is False for pi in program_infos.programs
                 )
 
                 if not has_missing and has_test_binary:  # All collections are present - success!
@@ -158,28 +156,20 @@ async def invoke_tool_concurrently(base_url: str, server_binary_path):
                     "decompile_function",
                     {"binary_name": binary_name, "name_or_address": _MAIN_FUNC_NAME},
                 ),
-                await session.call_tool(
-                    "search_symbols_by_name", {"binary_name": binary_name, "query": "function"}
-                ),
+                await session.call_tool("search_symbols_by_name", {"binary_name": binary_name, "query": "function"}),
                 await session.call_tool("list_project_binaries", {}),
-                await session.call_tool(
-                    "list_project_binary_metadata", {"binary_name": binary_name}
-                ),
+                await session.call_tool("list_project_binary_metadata", {"binary_name": binary_name}),
                 await session.call_tool("list_exports", {"binary_name": binary_name}),
                 await session.call_tool("list_imports", {"binary_name": binary_name}),
                 await session.call_tool(
                     "list_xrefs",
                     {"binary_name": binary_name, "name_or_address": name_one},
                 ),
-                await session.call_tool(
-                    "search_symbols_by_name", {"binary_name": binary_name, "query": "function"}
-                ),
+                await session.call_tool("search_symbols_by_name", {"binary_name": binary_name, "query": "function"}),
                 await session.call_tool(
                     "search_code", {"binary_name": binary_name, "query": "Function One", "limit": 1}
                 ),
-                await session.call_tool(
-                    "search_strings", {"binary_name": binary_name, "query": "hello", "limit": 1}
-                ),
+                await session.call_tool("search_strings", {"binary_name": binary_name, "query": "hello", "limit": 1}),
                 await session.call_tool(
                     "read_bytes",
                     {"binary_name": binary_name, "address": _BASE_ADDRESS, "size": 4},
@@ -255,9 +245,7 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
     num_clients = 2
     name_one = f"{_FUNC_PREFIX}function_one"
     name_two = f"{_FUNC_PREFIX}function_two"
-    tasks = [
-        invoke_tool_concurrently(streamable_base_url, streamable_binary) for _ in range(num_clients)
-    ]
+    tasks = [invoke_tool_concurrently(streamable_base_url, streamable_binary) for _ in range(num_clients)]
     results = await asyncio.gather(*tasks)
 
     assert len(results) == num_clients
@@ -282,10 +270,7 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
         program_infos_result = json.loads(client_responses[2].content[0].text)
         program_infos = ProgramInfos(**program_infos_result)
         assert len(program_infos.programs) >= 1
-        assert any(
-            os.path.basename(streamable_binary) in program.name
-            for program in program_infos.programs
-        )
+        assert any(os.path.basename(streamable_binary) in program.name for program in program_infos.programs)
 
         # List project binary metadata
         metadata = json.loads(client_responses[3].content[0].text)
@@ -313,9 +298,7 @@ async def test_concurrent_streamable_client_invocations(streamable_server):
         cross_references_result = json.loads(client_responses[6].content[0].text)
         cross_reference_infos = CrossReferenceInfos(**cross_references_result)
         assert len(cross_reference_infos.cross_references) > 0
-        assert any(
-            ref.function_name == _MAIN_FUNC_NAME for ref in cross_reference_infos.cross_references
-        )
+        assert any(ref.function_name == _MAIN_FUNC_NAME for ref in cross_reference_infos.cross_references)
 
         # Search symbols results
         search_symbols_result = json.loads(client_responses[7].content[0].text)

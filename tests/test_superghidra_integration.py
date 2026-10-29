@@ -57,6 +57,7 @@ from pyghidra_mcp.tools import GhidraTools
 # Fixtures
 # ==============================================================================
 
+
 @pytest.fixture
 def temp_l2_cache():
     """Provides an isolated L2SQLiteCache instance backed by a temporary directory."""
@@ -85,6 +86,7 @@ def mock_ghidra_modules(monkeypatch):
 # ==============================================================================
 # 1. L2SQLiteCache Standalone Tests
 # ==============================================================================
+
 
 class TestL2SQLiteCacheStandalone:
     """Verifies WAL mode, storage, case-insensitive retrieval, eviction, and clearing."""
@@ -185,6 +187,7 @@ class TestL2SQLiteCacheStandalone:
 # 2. DecompilerPool Governor & Hibernate Tests
 # ==============================================================================
 
+
 class TestDecompilerPoolGovernorAndHibernate:
     """Verifies resource governor profiles ('eco', 'balanced', 'turbo', 'auto'), hibernation, and re-arming."""
 
@@ -276,6 +279,7 @@ class TestDecompilerPoolGovernorAndHibernate:
 # 3. L2 Cache Integration in GhidraTools.decompile_function
 # ==============================================================================
 
+
 class TestL2CacheGhidraToolsIntegration:
     """Verifies that L2 cache hits bypass Java decompiler and cache misses populate L2 cache."""
 
@@ -327,9 +331,7 @@ class TestL2CacheGhidraToolsIntegration:
         # Zero calls to pool.acquire()
         mock_pool.acquire.assert_not_called()
 
-    def test_cache_miss_decompiles_and_populates_l2_cache(
-        self, temp_l2_cache: L2SQLiteCache, mock_ghidra_modules
-    ):
+    def test_cache_miss_decompiles_and_populates_l2_cache(self, temp_l2_cache: L2SQLiteCache, mock_ghidra_modules):
         """Verify that a cache miss calls the native decompiler and caches the result for instant repeats."""
         mock_program = Mock()
         mock_program.getName.return_value = "target_game.exe"
@@ -411,6 +413,7 @@ class TestL2CacheGhidraToolsIntegration:
 # ==============================================================================
 # 4. New MCP Tools Tests (rva_translate, set_governor_mode, hibernate, clear_cache)
 # ==============================================================================
+
 
 class TestNewMCPToolsSuperGhidra:
     """Verifies that the new SuperGhidra MCP tools execute cleanly and produce valid response models."""

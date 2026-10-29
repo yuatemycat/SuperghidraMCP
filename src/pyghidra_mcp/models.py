@@ -312,6 +312,7 @@ class ForkMergeResult(BaseModel):
     entries: list[ForkMergeEntry]
     pending_ops: int
 
+
 class ForkPrunedItem(BaseModel):
     fork_id: str
     reason: str

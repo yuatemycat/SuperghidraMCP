@@ -34,9 +34,7 @@ async def test_locked_project_forks_and_primary_merges(
     test_binary, ghidra_env, isolated_project_root, func_prefix, main_func_name
 ):
     """A second server on a locked project works on a fork the primary can merge."""
-    primary = _shared_project_params(
-        isolated_project_root, ghidra_env, "--wait-for-analysis", test_binary
-    )
+    primary = _shared_project_params(isolated_project_root, ghidra_env, "--wait-for-analysis", test_binary)
     secondary = _shared_project_params(isolated_project_root, ghidra_env, "--fork-label", "b")
     binary_name = PyGhidraContext._gen_unique_bin_name(test_binary)
 
@@ -88,9 +86,7 @@ async def test_locked_project_forks_and_primary_merges(
             assert merged["counts"] == {"applied": 1, "conflict": 1}
             assert merged["pending_ops"] == 1
 
-            decompiled = await _call(
-                a, "decompile_function", binary_name=binary_name, name_or_address=main_func_name
-            )
+            decompiled = await _call(a, "decompile_function", binary_name=binary_name, name_or_address=main_func_name)
             assert "fork_one" in decompiled["code"]
             assert "primary_two" in decompiled["code"]
 
@@ -101,12 +97,8 @@ async def test_locked_project_forks_and_primary_merges(
 
 @pytest.mark.asyncio
 async def test_locked_project_can_refuse_to_fork(test_binary, ghidra_env, isolated_project_root):
-    primary = _shared_project_params(
-        isolated_project_root, ghidra_env, "--wait-for-analysis", test_binary
-    )
-    secondary = _shared_project_params(
-        isolated_project_root, ghidra_env, "--on-project-locked", "fail"
-    )
+    primary = _shared_project_params(isolated_project_root, ghidra_env, "--wait-for-analysis", test_binary)
+    secondary = _shared_project_params(isolated_project_root, ghidra_env, "--on-project-locked", "fail")
 
     async with stdio_client(primary) as (read_a, write_a):
         async with ClientSession(read_a, write_a) as a:

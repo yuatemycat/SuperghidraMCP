@@ -69,9 +69,7 @@ void hello() {
 
 
 @pytest.mark.asyncio
-async def test_import_binaries_recursive(
-    binaries_in_directory, server_params_no_input, find_binary_in_list_response
-):
+async def test_import_binaries_recursive(binaries_in_directory, server_params_no_input, find_binary_in_list_response):
     """
     Test that import_binaries recursively discovers and imports multiple binaries
     from a directory structure, skipping non-binary files.
@@ -84,9 +82,7 @@ async def test_import_binaries_recursive(
             await session.initialize()
 
             # Import the entire filesystem directory recursively
-            response = await session.call_tool(
-                "import_binary", {"binary_path": str(filesystem_root)}
-            )
+            response = await session.call_tool("import_binary", {"binary_path": str(filesystem_root)})
             content = response.content[0].text
             assert '"queued_count": 2' in content
             assert '"skipped_count": 4' in content

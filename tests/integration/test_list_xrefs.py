@@ -32,10 +32,7 @@ async def test_list_xrefs(server_params, func_prefix, main_func_name):
 
             assert cross_reference_infos.target == name_one
             assert len(cross_reference_infos.cross_references) > 0
-            assert any(
-                ref.function_name == main_func_name
-                for ref in cross_reference_infos.cross_references
-            )
+            assert any(ref.function_name == main_func_name for ref in cross_reference_infos.cross_references)
 
 
 @pytest.mark.asyncio

@@ -18,9 +18,7 @@ async def test_search_strings_hello(server_params_no_thread):
 
             binary_name = PyGhidraContext._gen_unique_bin_name(server_params_no_thread.args[-1])
 
-            response = await session.call_tool(
-                "search_strings", {"binary_name": binary_name, "query": "hello"}
-            )
+            response = await session.call_tool("search_strings", {"binary_name": binary_name, "query": "hello"})
 
             search_results = StringSearchResults.model_validate_json(response.content[0].text)
             assert len(search_results.strings) >= 1

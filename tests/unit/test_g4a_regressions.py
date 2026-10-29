@@ -211,9 +211,11 @@ def test_7_gpu_adrp_scan_error_path_rolls_back_and_returns_error():
         mock_block = MagicMock()
         mock_block.isExecute.return_value = True
         mock_block.getSize.return_value = 32
+
         def read_block(start, chunk):
             chunk[:32] = b"\x00" * 32
             return 32
+
         mock_block.getBytes.side_effect = read_block
         mock_block.getStart().getOffset.return_value = 0x1000
         mock_memory.getBlocks.return_value = [mock_block]

@@ -362,9 +362,7 @@ def test_decompiled_function_with_rich_fields():
 def test_decompiled_function_batch_list():
     """Test a list of DecompiledFunction results with mixed success and error."""
     results = [
-        DecompiledFunction(
-            name="good_func", code="int good_func() { return 0; }", signature="int good_func()"
-        ),
+        DecompiledFunction(name="good_func", code="int good_func() { return 0; }", signature="int good_func()"),
         DecompiledFunction(name="bad_func", code="", error="Function not found"),
     ]
     assert len(results) == 2

@@ -80,9 +80,7 @@ async def test_open_specific_project_from_multi_project_directory(
 
 
 @pytest.mark.asyncio
-async def test_open_different_project_from_same_directory(
-    server_params_other_project, multi_project_directory
-):
+async def test_open_different_project_from_same_directory(server_params_other_project, multi_project_directory):
     """Test opening different project from same multi-project directory"""
     async with stdio_client(server_params_other_project) as (read, write):
         async with ClientSession(read, write) as session:
@@ -100,12 +98,8 @@ async def test_open_different_project_from_same_directory(
             # Verify that the correct project was opened
             # The project should be "macos-test" from the project name
             macos_artifact_dir = multi_project_directory / "macos-test" / "macos-test-superghidra-mcp"
-            assert (
-                macos_artifact_dir.exists()
-            ), "Artifact directory for macos-test should be created"
-            assert (
-                macos_artifact_dir / "chromadb"
-            ).exists(), "ChromaDB should exist for macos-test"
+            assert macos_artifact_dir.exists(), "Artifact directory for macos-test should be created"
+            assert (macos_artifact_dir / "chromadb").exists(), "ChromaDB should exist for macos-test"
             assert (macos_artifact_dir / "gzfs").exists(), "GZFS should exist for macos-test"
 
 
@@ -200,9 +194,7 @@ async def test_shared_base_directory_projects(ghidra_env):
 
         assert proj1_artifacts.exists(), "proj1-superghidra-mcp should be created"
         assert proj2_artifacts.exists(), "proj2-superghidra-mcp should be created"
-        assert (
-            proj1_artifacts != proj2_artifacts
-        ), "Projects should have separate artifact directories"
+        assert proj1_artifacts != proj2_artifacts, "Projects should have separate artifact directories"
 
         # Verify artifact structure
         assert (proj1_artifacts / "chromadb").exists(), "proj1 chromadb should exist"
@@ -211,9 +203,5 @@ async def test_shared_base_directory_projects(ghidra_env):
         assert (proj2_artifacts / "gzfs").exists(), "proj2 gzfs should exist"
 
         # Verify consistent naming (always append -superghidra-mcp)
-        assert (
-            proj1_artifacts.name == "proj1-superghidra-mcp"
-        ), "proj1 artifacts should have project name"
-        assert (
-            proj2_artifacts.name == "proj2-superghidra-mcp"
-        ), "proj2 artifacts should have project name"
+        assert proj1_artifacts.name == "proj1-superghidra-mcp", "proj1 artifacts should have project name"
+        assert proj2_artifacts.name == "proj2-superghidra-mcp", "proj2 artifacts should have project name"

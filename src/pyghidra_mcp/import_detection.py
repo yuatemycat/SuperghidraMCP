@@ -24,9 +24,7 @@ def is_ghidra_importable(path: Path, *, allow_binary_loader: bool = False) -> bo
         if bool(loader_map.isEmpty()):
             return False
 
-        loader_names = {
-            str(loader.getClass().getSimpleName()) for loader in loader_map.keySet().toArray()
-        }
+        loader_names = {str(loader.getClass().getSimpleName()) for loader in loader_map.keySet().toArray()}
         if loader_names == {"BinaryLoader"}:
             return allow_binary_loader
         return True

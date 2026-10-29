@@ -1,6 +1,7 @@
 """Integration and regression test suite for fork conflict resolution, comment combination,
 alias preservation, function-scoped atomic edits, and session conflict notifications.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

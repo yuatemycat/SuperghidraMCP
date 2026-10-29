@@ -75,9 +75,7 @@ async def test_search_code(server_params, func_prefix):
                 {"binary_name": binary_name, "name_or_address": name},
             )
 
-            decompiled_function = DecompiledFunction.model_validate_json(
-                decompile_response.content[0].text
-            )
+            decompiled_function = DecompiledFunction.model_validate_json(decompile_response.content[0].text)
             query_code = decompiled_function.code
 
             # 2. Use the decompiled code to search for the function

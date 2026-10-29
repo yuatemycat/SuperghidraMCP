@@ -11,24 +11,25 @@ from unittest.mock import Mock
 import click.testing
 import pytest
 from mcp import ClientSession
+
 try:
     from mcp.client._memory import InMemoryTransport
 except ImportError:
     from contextlib import asynccontextmanager
+
     import anyio
     from mcp.shared.memory import create_client_server_memory_streams
 
     @asynccontextmanager
     async def InMemoryTransport(server):
-        async with create_client_server_memory_streams() as (client_streams, server_streams):
+        lowlevel = getattr(server, "_lowlevel_server", getattr(server, "_mcp_server", server))
+        async with create_client_server_memory_streams() as ((client_read, client_write), (server_read, server_write)):
             async with anyio.create_task_group() as tg:
-                tg.start_soon(
-                    lambda: server._lowlevel_server.run(
-                        server_streams[0], server_streams[1], server._lowlevel_server.create_initialization_options()
-                    )
-                )
-                yield client_streams
+                tg.start_soon(lambda: lowlevel.run(server_read, server_write, lowlevel.create_initialization_options()))
+                yield client_read, client_write
                 tg.cancel_scope.cancel()
+
+
 try:
     from mcp.server.mcpserver import MCPServer
 except ImportError:
@@ -126,7 +127,7 @@ async def test_common_tool_call_over_mcp_v2_protocol():
             await session.initialize()
             result = await session.call_tool("list_project_binaries")
 
-    assert result.is_error is False
+    assert (getattr(result, "is_error", None) or getattr(result, "isError", None)) is False
     assert json.loads(result.content[0].text) == {"programs": [], "session": None}
     pyghidra_context.list_project_binary_infos.assert_called_once_with()
 
@@ -144,7 +145,7 @@ async def test_tool_validation_failure_is_a_tool_result_error():
                 {"binary_name": "sample", "address": "1000", "count": 201},
             )
 
-    assert result.is_error is True
+    assert (getattr(result, "is_error", None) or getattr(result, "isError", None)) is True
     assert "count must be <= 200" in result.content[0].text
 
 
@@ -531,10 +532,7 @@ class TestGuiConsoleCtrlHandler:
         monkeypatch.setattr(server.sys, "platform", "linux")
         launcher = Mock()
 
-        assert (
-            server.install_gui_console_ctrl_handler(launcher, server._SigintShutdownHandler())
-            is None
-        )
+        assert server.install_gui_console_ctrl_handler(launcher, server._SigintShutdownHandler()) is None
         launcher.wait_for_front_end.assert_not_called()
 
 

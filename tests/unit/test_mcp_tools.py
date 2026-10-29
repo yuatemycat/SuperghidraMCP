@@ -3,7 +3,11 @@ import threading
 from unittest.mock import Mock
 
 import pytest
-from mcp.server.mcpserver.exceptions import ToolError
+
+try:
+    from mcp.server.fastmcp.exceptions import ToolError
+except ImportError:
+    from mcp.server.mcpserver.exceptions import ToolError
 
 from pyghidra_mcp.gui_context import GuiPyGhidraContext
 from pyghidra_mcp.mcp_tools import (
@@ -42,9 +46,7 @@ def test_list_project_binaries_uses_project_wide_context_listing():
     )
     pyghidra_context = Mock()
     pyghidra_context.list_project_binary_infos.return_value = [program_info]
-    pyghidra_context.list_program_infos.side_effect = AssertionError(
-        "should not use open-program listing"
-    )
+    pyghidra_context.list_program_infos.side_effect = AssertionError("should not use open-program listing")
 
     ctx = Mock()
     ctx.request_context.lifespan_context = pyghidra_context
@@ -180,9 +182,7 @@ def test_set_function_prototype_uses_tool_path(monkeypatch):
         ctx=ctx,
     )
 
-    fake_tools.set_function_prototype.assert_called_once_with(
-        "function_one", "long function_one(long count)"
-    )
+    fake_tools.set_function_prototype.assert_called_once_with("function_one", "long function_one(long count)")
     assert response.binary_name == "sample"
     assert response.function_name == "function_one"
     assert response.function_address == "100001000"
@@ -314,9 +314,7 @@ async def test_decompile_does_not_block_other_tool_calls(monkeypatch):
         ctx=ctx,
     )
 
-    fake_tools.search_symbols_by_name.assert_called_once_with(
-        "entry", functions_only=False, offset=0, limit=25
-    )
+    fake_tools.search_symbols_by_name.assert_called_once_with("entry", functions_only=False, offset=0, limit=25)
     assert symbols.symbols[0].name == "entry"
     assert not decompile_task.done()
 

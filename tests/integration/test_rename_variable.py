@@ -15,9 +15,7 @@ def _callee_name(callee):
 
 
 def _find_function_one_name(callees) -> str:
-    return next(
-        name for name in (_callee_name(c) for c in callees) if name.endswith("function_one")
-    )
+    return next(name for name in (_callee_name(c) for c in callees) if name.endswith("function_one"))
 
 
 async def _resolve_function_one_name(session: ClientSession, binary_name: str) -> str:
@@ -50,9 +48,7 @@ async def _resolve_function_one_name(session: ClientSession, binary_name: str) -
         except StopIteration:
             pass
 
-    raise AssertionError(
-        "Unable to resolve function_one by symbol search or caller callee discovery"
-    )
+    raise AssertionError("Unable to resolve function_one by symbol search or caller callee discovery")
 
 
 async def _resolve_binary_name(session: ClientSession) -> str:
@@ -287,9 +283,7 @@ async def test_set_function_prototype_tool(variable_server_params, variable_test
 
 
 @pytest.mark.asyncio
-async def test_set_function_prototype_surfaces_parser_errors(
-    variable_server_params, variable_test_binary
-):
+async def test_set_function_prototype_surfaces_parser_errors(variable_server_params, variable_test_binary):
     async with stdio_client(variable_server_params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()

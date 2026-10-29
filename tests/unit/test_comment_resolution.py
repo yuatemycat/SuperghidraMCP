@@ -15,9 +15,7 @@ def _make_tools():
 
 
 def _install_listing_module(monkeypatch):
-    listing_module = SimpleNamespace(
-        CommentType=SimpleNamespace(PLATE=0, PRE=1, EOL=2, POST=3, REPEATABLE=4)
-    )
+    listing_module = SimpleNamespace(CommentType=SimpleNamespace(PLATE=0, PRE=1, EOL=2, POST=3, REPEATABLE=4))
     monkeypatch.setitem(sys.modules, "ghidra.program.model.listing", listing_module)
 
 

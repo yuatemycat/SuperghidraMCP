@@ -53,8 +53,7 @@ def ghidra_env():
         env["GHIDRA_INSTALL_DIR"] = "/ghidra"
         return env
     pytest.skip(
-        "GHIDRA installation not found. Set GHIDRA_INSTALL_DIR to a valid Ghidra install, "
-        "or ensure /ghidra exists."
+        "GHIDRA installation not found. Set GHIDRA_INSTALL_DIR to a valid Ghidra install, or ensure /ghidra exists."
     )
 
 

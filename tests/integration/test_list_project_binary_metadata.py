@@ -27,9 +27,7 @@ async def test_list_project_binary_metadata(server_params):
             binary_name = program_infos.programs[0].name
 
             # Get the metadata
-            tool_resp = await session.call_tool(
-                "list_project_binary_metadata", {"binary_name": binary_name}
-            )
+            tool_resp = await session.call_tool("list_project_binary_metadata", {"binary_name": binary_name})
 
             assert tool_resp is not None
             metadata = json.loads(tool_resp.content[0].text)

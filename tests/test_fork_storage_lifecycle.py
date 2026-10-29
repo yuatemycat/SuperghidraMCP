@@ -56,9 +56,7 @@ def _fake_pyghidra_context(
     ctx.project_name = "test_project"
     ctx.project_path = tmp_path / "test_project"
     ctx.project_path.mkdir(parents=True, exist_ok=True)
-    ctx.pyghidra_mcp_dir = (
-        pyghidra_mcp_dir or ctx.project_path / "superghidra-mcp"
-    )
+    ctx.pyghidra_mcp_dir = pyghidra_mcp_dir or ctx.project_path / "superghidra-mcp"
     ctx.pyghidra_mcp_dir.mkdir(parents=True, exist_ok=True)
     ctx.fork_session = None
     ctx.force_analysis = False

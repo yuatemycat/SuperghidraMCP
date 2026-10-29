@@ -24,8 +24,8 @@ else:
         from mcp.server.mcpserver.exceptions import ToolError
     except ImportError:
         try:
-            from mcp.server.mcpserver import Context
-            from mcp.server.mcpserver.exceptions import ToolError
+            from mcp.server.fastmcp import Context
+            from mcp.server.fastmcp.exceptions import ToolError
         except ImportError:
             Context = Any
             ToolError = Exception

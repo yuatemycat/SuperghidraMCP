@@ -48,19 +48,14 @@ def test_normalize_collection_name_satisfies_chroma_validation(tmp_path):
     ]
     for binary_name, collection_name in cases:
         assert probe._normalize_collection_name(binary_name) == collection_name
-        assert (
-            probe.chroma_client.create_collection(name=collection_name).name
-            == collection_name
-        )
+        assert probe.chroma_client.create_collection(name=collection_name).name == collection_name
 
 
 def test_incomplete_collection_is_deleted_and_rebuilt(tmp_path):
     # Simulate an interrupted index: collection created + partially populated,
     # but never marked complete.
     probe = _Probe(tmp_path)
-    collection = probe.chroma_client.create_collection(
-        name="bin_partial", metadata={COLLECTION_COMPLETE_KEY: False}
-    )
+    collection = probe.chroma_client.create_collection(name="bin_partial", metadata={COLLECTION_COMPLETE_KEY: False})
     collection.add(documents=["partial"], ids=["1"])
 
     # Reopen from disk: the gate must reject and delete the partial collection.
@@ -74,9 +69,7 @@ def test_incomplete_collection_is_deleted_and_rebuilt(tmp_path):
 
 def test_complete_collection_is_reused(tmp_path):
     probe = _Probe(tmp_path)
-    collection = probe.chroma_client.create_collection(
-        name="bin_complete", metadata={COLLECTION_COMPLETE_KEY: False}
-    )
+    collection = probe.chroma_client.create_collection(name="bin_complete", metadata={COLLECTION_COMPLETE_KEY: False})
     collection.add(documents=["a", "b"], ids=["1", "2"])
     probe._mark_collection_complete(collection, function_count=2)
 
@@ -129,9 +122,7 @@ def test_code_indexing_uses_a_finite_decompile_timeout(monkeypatch):
 
     probe._init_chroma_code_collection_for_program(program_info)
 
-    tools.decompile_function.assert_called_once_with(
-        function, timeout=DEFAULT_DECOMPILE_TIMEOUT_SECONDS
-    )
+    tools.decompile_function.assert_called_once_with(function, timeout=DEFAULT_DECOMPILE_TIMEOUT_SECONDS)
     collection.add.assert_called_once_with(
         documents=["int entry(void) { return 0; }"],
         metadatas=[{"function_name": "entry-1000", "entry_point": "1000"}],

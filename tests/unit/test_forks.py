@@ -95,9 +95,7 @@ def test_list_forks_reports_liveness_and_pending_edits(tmp_path):
     stopped = forks.create_fork(parent, label="stopped")
     stopped.record("rename_function", "/b", address="1", old="a", new="b")
     stopped.record("rename_function", "/b", address="2", old="c", new="d")
-    (stopped.fork_dir / forks.MERGE_STATE_FILE).write_text(
-        json.dumps({"resolved": {"1": "applied"}})
-    )
+    (stopped.fork_dir / forks.MERGE_STATE_FILE).write_text(json.dumps({"resolved": {"1": "applied"}}))
     _stop(stopped, closed=False)
 
     by_label = {info["label"]: info for info in forks.list_forks(parent.pyghidra_mcp_dir)}
@@ -460,9 +458,7 @@ def test_rename_on_fork_session_is_journaled(tmp_path, monkeypatch):
     fork = forks.create_fork(_make_parent_project(tmp_path))
     program_info = Mock()
     program_info.program.getDomainFile.return_value.getPathname.return_value = BIN
-    pyghidra_context = SimpleNamespace(
-        fork_session=fork, get_program_info=lambda _name: program_info
-    )
+    pyghidra_context = SimpleNamespace(fork_session=fork, get_program_info=lambda _name: program_info)
     fake_tools = Mock()
     fake_tools.rename_function.return_value = {
         "address": "1000",
@@ -487,9 +483,7 @@ def test_rename_on_fork_session_is_journaled(tmp_path, monkeypatch):
 def test_merge_fork_tool_refuses_to_run_on_a_fork(tmp_path):
     fork = forks.create_fork(_make_parent_project(tmp_path))
     with pytest.raises(Exception, match="itself a fork"):
-        mcp_tools.merge_fork(
-            fork_id=fork.fork_id, ctx=_tool_ctx(SimpleNamespace(fork_session=fork))
-        )
+        mcp_tools.merge_fork(fork_id=fork.fork_id, ctx=_tool_ctx(SimpleNamespace(fork_session=fork)))
 
 
 def _context_kwargs():
@@ -508,9 +502,7 @@ def test_create_project_context_forks_when_project_is_locked(tmp_path, monkeypat
 
     monkeypatch.setattr(server, "PyGhidraContext", fake_context)
 
-    context = server.create_project_context(
-        project_spec=parent, fork_label="b", **_context_kwargs()
-    )
+    context = server.create_project_context(project_spec=parent, fork_label="b", **_context_kwargs())
 
     fork = context.fork_session
     assert isinstance(fork, forks.ForkSession)
@@ -521,14 +513,10 @@ def test_create_project_context_forks_when_project_is_locked(tmp_path, monkeypat
 
 def test_create_project_context_fail_mode_exits_with_guidance(tmp_path, monkeypatch):
     parent = _make_parent_project(tmp_path)
-    monkeypatch.setattr(
-        server, "PyGhidraContext", Mock(side_effect=forks.ProjectLockedError("locked"))
-    )
+    monkeypatch.setattr(server, "PyGhidraContext", Mock(side_effect=forks.ProjectLockedError("locked")))
 
     with pytest.raises(click.ClickException, match="streamable-http"):
-        server.create_project_context(
-            project_spec=parent, on_project_locked="fail", **_context_kwargs()
-        )
+        server.create_project_context(project_spec=parent, on_project_locked="fail", **_context_kwargs())
 
 
 def test_create_project_context_retries_a_fork_that_fails_to_open(tmp_path, monkeypatch):

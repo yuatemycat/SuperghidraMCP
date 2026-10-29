@@ -41,6 +41,7 @@ def test_gui_stdio_rejected_before_ghidra_start():
     assert result.exit_code != 0
     assert "--gui requires --transport streamable-http or --transport http" in result.output
 
+
 def test_project_spec_falls_back_to_legacy_pyghidra_mcp_dir(tmp_path: Path):
     legacy = tmp_path / "sample-pyghidra-mcp"
     legacy.mkdir()
@@ -61,4 +62,3 @@ def test_project_spec_prefers_canonical_superghidra_mcp_dir(tmp_path: Path):
 
     spec = ProjectSpec.from_cli(gpr, DEFAULT_PROJECT_NAME)
     assert spec.pyghidra_mcp_dir == canonical
-

@@ -30,9 +30,7 @@ class IndexingMixin:
         self.chroma_client = chromadb.PersistentClient(
             path=str(chromadb_path), settings=Settings(anonymized_telemetry=False)
         )
-        self.index_executor = (
-            concurrent.futures.ThreadPoolExecutor(max_workers=1) if threaded else None
-        )
+        self.index_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1) if threaded else None
         self._index_futures: dict[str, concurrent.futures.Future] = {}
         self._index_lock = threading.Lock()
 
@@ -73,9 +71,7 @@ class IndexingMixin:
         program_info = self._lookup_program_info(binary_name)
         if program_info is None or not program_info.analysis_complete:
             return False
-        if (not code or program_info.code_collection is not None) and (
-            not strings or program_info.strings is not None
-        ):
+        if (not code or program_info.code_collection is not None) and (not strings or program_info.strings is not None):
             return False
 
         with self._index_lock:
@@ -92,9 +88,7 @@ class IndexingMixin:
                 )
                 self._index_futures[binary_name] = future
                 future.add_done_callback(
-                    lambda done_future, name=binary_name: self._index_done_callback(
-                        name, done_future
-                    )
+                    lambda done_future, name=binary_name: self._index_done_callback(name, done_future)
                 )
                 return True
 
@@ -103,11 +97,7 @@ class IndexingMixin:
 
     def schedule_startup_indexing(self, *, max_binaries: int | None = 10) -> None:
         """Eagerly index only manageable existing projects on startup."""
-        analyzed_programs = [
-            program_info
-            for program_info in self.programs.values()
-            if program_info.analysis_complete
-        ]
+        analyzed_programs = [program_info for program_info in self.programs.values() if program_info.analysis_complete]
         if max_binaries is not None and len(analyzed_programs) > max_binaries:
             logger.info(
                 "Skipping startup indexing for %s binaries; indexing will start lazily.",
@@ -158,29 +148,21 @@ class IndexingMixin:
         if metadata.get(COLLECTION_COMPLETE_KEY):
             return collection
 
-        logger.warning(
-            "Collection '%s' is incomplete (interrupted index?); deleting to rebuild.", name
-        )
+        logger.warning("Collection '%s' is incomplete (interrupted index?); deleting to rebuild.", name)
         self.chroma_client.delete_collection(name=name)
         return None
 
     def _mark_collection_complete(self, collection: Any, function_count: int) -> None:
         """Flip a fully-populated collection's completion marker on disk."""
-        collection.modify(
-            metadata={COLLECTION_COMPLETE_KEY: True, "function_count": function_count}
-        )
+        collection.modify(metadata={COLLECTION_COMPLETE_KEY: True, "function_count": function_count})
 
     def _init_chroma_code_collection_for_program(self, program_info: Any) -> None:
         from ghidra.program.model.listing import Function
 
         logger.info("Initializing Chroma code collection for %s", program_info.name)
-        existing = self._open_complete_collection(
-            self._normalize_collection_name(program_info.name)
-        )
+        existing = self._open_complete_collection(self._normalize_collection_name(program_info.name))
         if existing is not None:
-            logger.info(
-                "Collection '%s' already complete; skipping code ingest.", program_info.name
-            )
+            logger.info("Collection '%s' already complete; skipping code ingest.", program_info.name)
             program_info.code_collection = existing
             return
 
@@ -196,9 +178,7 @@ class IndexingMixin:
             try:
                 if i % 10 == 0:
                     logger.debug("Decompiling %s/%s", i, len(functions))
-                decompiled = tools.decompile_function(
-                    func, timeout=DEFAULT_DECOMPILE_TIMEOUT_SECONDS
-                )
+                decompiled = tools.decompile_function(func, timeout=DEFAULT_DECOMPILE_TIMEOUT_SECONDS)
                 decompiles.append(decompiled.code)
                 ids.append(decompiled.name)
                 metadatas.append(

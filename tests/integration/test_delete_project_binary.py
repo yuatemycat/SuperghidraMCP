@@ -20,9 +20,7 @@ async def test_delete_project_binary(server_params_no_thread):
             await session.initialize()
 
             # Generate a unique binary name for the test binary
-            binary_name = "/" + PyGhidraContext._gen_unique_bin_name(
-                server_params_no_thread.args[-1]
-            )
+            binary_name = "/" + PyGhidraContext._gen_unique_bin_name(server_params_no_thread.args[-1])
 
             # Verify that the binary is in project
             tool_resp = await session.call_tool("list_project_binaries", {})
@@ -34,9 +32,7 @@ async def test_delete_project_binary(server_params_no_thread):
             assert binary_name in names
 
             # Delete the binary
-            tool_resp = await session.call_tool(
-                "delete_project_binary", {"binary_name": binary_name}
-            )
+            tool_resp = await session.call_tool("delete_project_binary", {"binary_name": binary_name})
             assert tool_resp is not None
             delete_result = tool_resp.content[0].text
             assert "Successfully deleted binary" in delete_result

@@ -63,9 +63,7 @@ def remove_console_ctrl_handler(callback: object | None) -> None:
     if callback is None or sys.platform != "win32":
         return
     if not ctypes.windll.kernel32.SetConsoleCtrlHandler(callback, False):
-        logger.warning(
-            "Could not unregister the Ctrl+C console handler (error %s).", ctypes.get_last_error()
-        )
+        logger.warning("Could not unregister the Ctrl+C console handler (error %s).", ctypes.get_last_error())
 
 
 def _framework_python_path() -> Path:
@@ -165,9 +163,7 @@ class GuiPyGhidraMcpLauncher(PyGhidraLauncher):
     def run_gui_event_loop(self) -> None:
         """Block until the GUI is shutting down, or until we are interrupted."""
 
-        if sys.platform == "darwin" and not (
-            self._is_exiting.is_set() or self._interrupted.is_set()
-        ):
+        if sys.platform == "darwin" and not (self._is_exiting.is_set() or self._interrupted.is_set()):
             from pyghidra.launcher import _run_mac_app
 
             _run_mac_app()

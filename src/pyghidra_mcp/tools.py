@@ -106,6 +106,7 @@ class GhidraTools:
         """Lazily records a mutation event to the SemanticDeltaLog."""
         try:
             from pyghidra_mcp.mcp_tools import _ensure_superghidra_imported
+
             _ensure_superghidra_imported()
             from superghidra.diff import semantic_delta_log
 
@@ -191,9 +192,7 @@ class GhidraTools:
             raise ValueError(f"Variable '{variable_name}' not found in function '{function_name}'.")
         if len(matches) > 1:
             kinds = ", ".join(kind for kind, _ in matches)
-            raise ValueError(
-                f"Ambiguous variable '{variable_name}' in function '{function_name}' ({kinds})."
-            )
+            raise ValueError(f"Ambiguous variable '{variable_name}' in function '{function_name}' ({kinds}).")
 
         variable_kind, variable = matches[0]
         return func, variable_kind, variable
@@ -287,20 +286,14 @@ class GhidraTools:
         Resolve a single function by name or address (exact match only).
         Raises if ambiguous or not found.
         """
-        matches = self._lookup_functions(
-            name_or_address, partial=False, include_externals=include_externals
-        )
+        matches = self._lookup_functions(name_or_address, partial=False, include_externals=include_externals)
 
         if len(matches) == 1:
             return matches[0]
         elif len(matches) > 1:
-            suggestions = [
-                f"{f.getSymbol().getName(True)}({f.getSignature()}) @ {f.getEntryPoint()}"
-                for f in matches
-            ]
+            suggestions = [f"{f.getSymbol().getName(True)}({f.getSignature()}) @ {f.getEntryPoint()}" for f in matches]
             raise ValueError(
-                f"Ambiguous match for '{name_or_address}'. Did you mean one of these: "
-                + ", ".join(suggestions)
+                f"Ambiguous match for '{name_or_address}'. Did you mean one of these: " + ", ".join(suggestions)
             )
         else:
             raise ValueError(f"Function or symbol '{name_or_address}' not found.")
@@ -315,9 +308,7 @@ class GhidraTools:
         Return all functions that match name_or_address (exact or partial).
         Never raises; returns empty list if none.
         """
-        return self._lookup_functions(
-            name_or_address, partial=True, include_externals=include_externals
-        )
+        return self._lookup_functions(name_or_address, partial=True, include_externals=include_externals)
 
     def _lookup_symbols(
         self,
@@ -386,8 +377,7 @@ class GhidraTools:
         elif len(matches) > 1:
             suggestions = [f"{s.getName(True)} @ {s.getAddress()}" for s in matches]
             raise ValueError(
-                f"Ambiguous match for '{name_or_address}'. Did you mean one of these: "
-                + ", ".join(suggestions)
+                f"Ambiguous match for '{name_or_address}'. Did you mean one of these: " + ", ".join(suggestions)
             )
         else:
             raise ValueError(f"Symbol '{name_or_address}' not found.")
@@ -451,11 +441,7 @@ class GhidraTools:
             ghidra_timeout = max(1, math.ceil(remaining))
             # Dynamic complexity downshifting on megafunctions or eco mode
             try:
-                body_size = (
-                    int(func.getBody().getNumAddresses())
-                    if hasattr(func, "getBody") and func.getBody()
-                    else 0
-                )
+                body_size = int(func.getBody().getNumAddresses()) if hasattr(func, "getBody") and func.getBody() else 0
                 res_mode = getattr(self.decompiler_pool, "resource_mode", "balanced")
                 if body_size >= 4096 or res_mode == "eco":
                     try:
@@ -548,9 +534,7 @@ class GhidraTools:
         return list(funcs)
 
     @handle_exceptions
-    def get_all_symbols(
-        self, include_externals: bool = False, include_dynamic=False
-    ) -> list["Symbol"]:
+    def get_all_symbols(self, include_externals: bool = False, include_dynamic=False) -> list["Symbol"]:
         """
         Gets all symbols within a binary.
         Returns a python list that doesn't need to be re-initialized.
@@ -637,9 +621,7 @@ class GhidraTools:
                     thunked = None
 
                 if thunked is not None:
-                    thunk_target = (
-                        f"{thunked.getSymbol().getName(True)} @ {thunked.getEntryPoint()}"
-                    )
+                    thunk_target = f"{thunked.getSymbol().getName(True)} @ {thunked.getEntryPoint()}"
 
         return SymbolInfo(
             name=symbol.getName(),
@@ -705,9 +687,7 @@ class GhidraTools:
         return results[offset : limit + offset]
 
     @handle_exceptions
-    def list_exports(
-        self, query: str | None = None, offset: int = 0, limit: int = 25
-    ) -> list[ExportInfo]:
+    def list_exports(self, query: str | None = None, offset: int = 0, limit: int = 25) -> list[ExportInfo]:
         """Lists all exported functions and symbols from a specified binary."""
         exports = []
         symbols = self.program.getSymbolTable().getAllSymbols(True)
@@ -719,18 +699,14 @@ class GhidraTools:
         return exports[offset : limit + offset]
 
     @handle_exceptions
-    def list_imports(
-        self, query: str | None = None, offset: int = 0, limit: int = 25
-    ) -> list[ImportInfo]:
+    def list_imports(self, query: str | None = None, offset: int = 0, limit: int = 25) -> list[ImportInfo]:
         """Lists all imported functions and symbols for a specified binary."""
         imports = []
         symbols = self.program.getSymbolTable().getExternalSymbols()
         for symbol in symbols:
             if query and not re.search(query, symbol.getName(), re.IGNORECASE):
                 continue
-            imports.append(
-                ImportInfo(name=symbol.getName(), library=str(symbol.getParentNamespace()))
-            )
+            imports.append(ImportInfo(name=symbol.getName(), library=str(symbol.getParentNamespace())))
         return imports[offset : limit + offset]
 
     @handle_exceptions
@@ -747,9 +723,7 @@ class GhidraTools:
         references = rm.getReferencesTo(addr)
 
         for ref in references:
-            from_func = self.program.getFunctionManager().getFunctionContaining(
-                ref.getFromAddress()
-            )
+            from_func = self.program.getFunctionManager().getFunctionContaining(ref.getFromAddress())
             cross_references.append(
                 CrossReferenceInfo(
                     function_name=from_func.getName() if from_func else None,
@@ -822,9 +796,7 @@ class GhidraTools:
                 search_results.append(
                     CodeSearchResult(
                         function_name=str(
-                            metadata.get("function_name", "unknown")
-                            if isinstance(metadata, dict)
-                            else "unknown"
+                            metadata.get("function_name", "unknown") if isinstance(metadata, dict) else "unknown"
                         ),
                         code=code,
                         similarity=1.0,  # Exact match
@@ -860,12 +832,8 @@ class GhidraTools:
             docs = docs_list[0][offset:]
             metadatas_list = results.get("metadatas")
             distances_list = results.get("distances")
-            metadatas = (
-                metadatas_list[0][offset:] if metadatas_list and len(metadatas_list) > 0 else []
-            )
-            distances = (
-                distances_list[0][offset:] if distances_list and len(distances_list) > 0 else []
-            )
+            metadatas = metadatas_list[0][offset:] if metadatas_list and len(metadatas_list) > 0 else []
+            distances = distances_list[0][offset:] if distances_list and len(distances_list) > 0 else []
 
             for i, doc in enumerate(docs):
                 metadata = metadatas[i] if i < len(metadatas) else {}
@@ -888,9 +856,7 @@ class GhidraTools:
                 search_results.append(
                     CodeSearchResult(
                         function_name=str(
-                            metadata.get("function_name", "unknown")
-                            if isinstance(metadata, dict)
-                            else "unknown"
+                            metadata.get("function_name", "unknown") if isinstance(metadata, dict) else "unknown"
                         ),
                         code=code,
                         similarity=similarity,
@@ -939,15 +905,11 @@ class GhidraTools:
                                   Results below this threshold are filtered out.
         """
         if not self.program_info.code_collection:
-            raise ValueError(
-                "Code indexing is not complete for this binary. Please try again later."
-            )
+            raise ValueError("Code indexing is not complete for this binary. Please try again later.")
 
         # ALWAYS get literal count (reuse for literal mode search)
         literal_results = self.program_info.code_collection.get(where_document={"$contains": query})
-        literal_total = (
-            len(literal_results["ids"]) if literal_results and literal_results.get("ids") else 0
-        )
+        literal_total = len(literal_results["ids"]) if literal_results and literal_results.get("ids") else 0
 
         # Total functions in collection (absolute total)
         total_functions = self.program_info.code_collection.count()
@@ -995,9 +957,7 @@ class GhidraTools:
         """Searches for strings within a binary using substring matching."""
 
         if self.program_info.strings is None:
-            raise ValueError(
-                "String indexing is not complete for this binary. Please try again later."
-            )
+            raise ValueError("String indexing is not complete for this binary. Please try again later.")
 
         query_lower = query.lower()
         return [
@@ -1056,9 +1016,7 @@ class GhidraTools:
         )
 
     @handle_exceptions
-    def disassemble(
-        self, address: str, count: int = 20, include_bytes: bool = False
-    ) -> "DisassembleResult":
+    def disassemble(self, address: str, count: int = 20, include_bytes: bool = False) -> "DisassembleResult":
         """Disassembles instructions starting at an address.
 
         Returns a compact, whitespace-aligned text listing rather than per-instruction
@@ -1158,9 +1116,7 @@ class GhidraTools:
                 break
 
         if not selected_graph_content:
-            raise ValueError(
-                f"Cg display type {cg_display_type.value} not found for function {cg_func}."
-            )
+            raise ValueError(f"Cg display type {cg_display_type.value} not found for function {cg_func}.")
 
         for graph_type, graph_content in graphs_data:
             if graph_type == "mermaid_url":
@@ -1220,9 +1176,7 @@ class GhidraTools:
     ) -> dict:
         from ghidra.program.model.symbol import SourceType
 
-        func, variable_kind, variable = self._resolve_function_variable(
-            function_name_or_address, variable_name
-        )
+        func, variable_kind, variable = self._resolve_function_variable(function_name_or_address, variable_name)
         self.evict_function_cache(func)
         old_name = str(variable_name)
         function_name = str(func.getName())
@@ -1252,9 +1206,7 @@ class GhidraTools:
     ) -> dict:
         from ghidra.program.model.symbol import SourceType
 
-        func, variable_kind, variable = self._resolve_function_variable(
-            function_name_or_address, variable_name
-        )
+        func, variable_kind, variable = self._resolve_function_variable(function_name_or_address, variable_name)
         self.evict_function_cache(func)
         function_name = str(func.getName())
         function_address = str(func.getEntryPoint())
@@ -1296,9 +1248,7 @@ class GhidraTools:
         function_address = str(func.getEntryPoint())
         old_prototype = str(func.getSignature())
 
-        parser = FunctionSignatureParser(
-            self.program.getDataTypeManager(), typing.cast(typing.Any, None)
-        )
+        parser = FunctionSignatureParser(self.program.getDataTypeManager(), typing.cast(typing.Any, None))
         parsed_signature = parser.parse(func.getSignature(False), prototype)
         cmd = ApplyFunctionSignatureCmd(
             func.getEntryPoint(),
@@ -1504,9 +1454,7 @@ class GhidraTools:
         except Exception:
             pass
 
-        raise ValueError(
-            f"Could not resolve comment target '{target}' as an address, symbol, or function."
-        )
+        raise ValueError(f"Could not resolve comment target '{target}' as an address, symbol, or function.")
 
     @handle_exceptions
     def migrate_struct_shifts(
