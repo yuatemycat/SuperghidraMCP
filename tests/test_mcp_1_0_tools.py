@@ -553,7 +553,7 @@ async def test_mcp_protocol_call_inspect_analysis_view():
                 {"parent_evidence_id": "ev_session_test", "facet": "compilable_c"},
             )
 
-    assert (getattr(result, "is_error", None) or getattr(result, "isError", None)) is False
+    assert getattr(result, "is_error", getattr(result, "isError", False)) is False
     data = json.loads(result.content[0].text)
     assert data["status"] == "ok"
     assert data["parent_evidence_id"] == "ev_session_test"
@@ -573,5 +573,5 @@ async def test_mcp_protocol_call_trace_native_values_error():
                 {"binary_path": "/invalid/missing/binary.so", "procedure": "main"},
             )
 
-    assert (getattr(result, "is_error", None) or getattr(result, "isError", None)) is True
+    assert getattr(result, "is_error", getattr(result, "isError", False)) is True
     assert "not exist" in result.content[0].text.lower() or "error" in result.content[0].text.lower()

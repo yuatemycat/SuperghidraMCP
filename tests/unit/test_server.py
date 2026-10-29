@@ -127,7 +127,7 @@ async def test_common_tool_call_over_mcp_v2_protocol():
             await session.initialize()
             result = await session.call_tool("list_project_binaries")
 
-    assert (getattr(result, "is_error", None) or getattr(result, "isError", None)) is False
+    assert getattr(result, "is_error", getattr(result, "isError", False)) is False
     assert json.loads(result.content[0].text) == {"programs": [], "session": None}
     pyghidra_context.list_project_binary_infos.assert_called_once_with()
 
@@ -145,7 +145,7 @@ async def test_tool_validation_failure_is_a_tool_result_error():
                 {"binary_name": "sample", "address": "1000", "count": 201},
             )
 
-    assert (getattr(result, "is_error", None) or getattr(result, "isError", None)) is True
+    assert getattr(result, "is_error", getattr(result, "isError", False)) is True
     assert "count must be <= 200" in result.content[0].text
 
 
