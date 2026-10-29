@@ -12,7 +12,43 @@ on:
         type: boolean
 
 jobs:
+  ci-gate-cli:
+    name: CLI CI Gate (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    defaults:
+      run:
+        working-directory: ./cli
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ..
+          pip install -e .[dev]
+
+      - name: Run Ruff Lint (Ubuntu only)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          ruff check src tests
+          ruff format --check src tests
+
+      - name: Run CLI unit tests
+        run: |
+          python -m pytest tests/unit/
+
   build-and-publish:
+    name: Build and Publish CLI Package
+    needs: [ci-gate-cli]
     runs-on: ubuntu-latest
     permissions:
       id-token: write

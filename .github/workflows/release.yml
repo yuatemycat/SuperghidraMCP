@@ -12,7 +12,45 @@ on:
         type: boolean
 
 jobs:
+  ci-gate:
+    name: CI Gate (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+
+      - name: Run Ruff Lint (Ubuntu only)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          ruff check src tests
+          ruff format --check src tests
+
+      - name: Run Pyright Type Checking (Ubuntu only)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          pip install ghidra-stubs
+          pyright src/
+
+      - name: Run unit and fork tests
+        run: |
+          python -m pytest tests/unit/ tests/test_fork_storage_lifecycle.py tests/test_fork_conflict_resolution.py tests/test_fork_evidence_resolution.py
+
   build-and-publish:
+    name: Build and Publish Package
+    needs: [ci-gate]
     runs-on: ubuntu-latest
     permissions:
       id-token: write
