@@ -150,3 +150,15 @@ def test_parent_chroma_client_raises_permission_error_on_mutation(tmp_path):
 
     with pytest.raises(PermissionError, match=r"read-only"):
         col.delete(ids=["illegal"])
+
+    # 3. Code reaching past wrapper to raw client & collections is also blocked by engine lockdown
+    raw_client = fork_indexer.parent_chroma_client._client
+    with pytest.raises(PermissionError, match=r"read-only"):
+        raw_client.create_collection("illegal_past_wrapper")
+
+    raw_col = raw_client.get_collection("bin_ro")
+    with pytest.raises(PermissionError, match=r"read-only"):
+        raw_col.add(ids=["illegal_past_wrapper"], documents=["dummy"])
+
+    with pytest.raises(PermissionError, match=r"read-only"):
+        raw_col.delete(ids=["illegal_past_wrapper"])

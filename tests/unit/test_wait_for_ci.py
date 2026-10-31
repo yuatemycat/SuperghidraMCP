@@ -281,3 +281,50 @@ def test_main_required_workflows_blocks_until_present(monkeypatch):
     with patch("scripts.wait_for_ci.fetch_runs", return_value=r_only_dev), patch("time.sleep"):
         code = wait_ci.main()
         assert code == 1, "Must abort if required workflow is missing after discovery timeout!"
+
+
+def test_main_cancelled_non_required_workflow_treated_as_skip(monkeypatch):
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "wait_for_ci.py",
+            "--commit",
+            "abc",
+            "--component",
+            "all",
+            "--required-workflows",
+            "devcontainer across versions,macos smoke",
+            "--discovery-timeout",
+            "1",
+            "--min-runs",
+            "2",
+            "--settle-seconds",
+            "0",
+        ],
+    )
+    r_dev = {
+        "databaseId": 601,
+        "name": "Pytest Local Repo Devcontainer Across Versions",
+        "headSha": "abc",
+        "status": "completed",
+        "conclusion": "success",
+    }
+    r_smoke = {
+        "databaseId": 602,
+        "name": "Pytest Local Repo macOS Smoke",
+        "headSha": "abc",
+        "status": "completed",
+        "conclusion": "success",
+    }
+    # macOS Compatibility was cancelled due to runner starvation
+    r_compat_cancelled = {
+        "databaseId": 603,
+        "name": "Pytest Local Repo macOS Compatibility",
+        "headSha": "abc",
+        "status": "completed",
+        "conclusion": "cancelled",
+    }
+    runs = [r_dev, r_smoke, r_compat_cancelled]
+    with patch("scripts.wait_for_ci.fetch_runs", return_value=runs), patch("time.sleep"):
+        code = wait_ci.main()
+        assert code == 0, "Cancelled non-required workflow must not block release publishing!"

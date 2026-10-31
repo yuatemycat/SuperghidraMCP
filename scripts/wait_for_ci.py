@@ -208,6 +208,7 @@ def main() -> int:
         pending: list[str] = []
         failed: list[tuple[str, str, str]] = []
         succeeded: list[str] = []
+        skipped: list[str] = []
 
         for r in current_targets:
             status = r.get("status")
@@ -217,6 +218,12 @@ def main() -> int:
                 pending.append(name)
             elif conclusion == "success":
                 succeeded.append(name)
+            elif conclusion in ("skipped", "cancelled"):
+                # Treat cancelled/skipped runs as non-blocking skips unless explicitly required
+                if any(req in name.lower() for req in required_patterns):
+                    failed.append((name, conclusion or "unknown", r.get("url", "")))
+                else:
+                    skipped.append(name)
             else:
                 failed.append((name, conclusion or "unknown", r.get("url", "")))
 
@@ -226,12 +233,12 @@ def main() -> int:
                 print(f"  FAILED: {name} (conclusion: {conclusion}) -> {url}", file=sys.stderr)
             return 1
 
-        discovered_names = [r.get("name", "").lower() for r in current_targets]
-        missing_required = [req for req in required_patterns if not any(req in name for name in discovered_names)]
+        succeeded_names = [r.get("name", "").lower() for r in current_targets if r.get("conclusion") == "success"]
+        missing_required = [req for req in required_patterns if not any(req in name for name in succeeded_names)]
 
         if (
             not pending
-            and len(succeeded) >= len(discovered_target_ids)
+            and (len(succeeded) + len(skipped)) >= len(discovered_target_ids)
             and len(succeeded) >= min_expected
             and not missing_required
         ):
