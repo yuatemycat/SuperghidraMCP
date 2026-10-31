@@ -328,3 +328,42 @@ def test_main_cancelled_non_required_workflow_treated_as_skip(monkeypatch):
     with patch("scripts.wait_for_ci.fetch_runs", return_value=runs), patch("time.sleep"):
         code = wait_ci.main()
         assert code == 0, "Cancelled non-required workflow must not block release publishing!"
+
+
+def test_main_required_workflows_defaults_min_expected_to_required_count(monkeypatch):
+    """When --required-workflows specifies 2 workflows and min-runs is omitted,
+    exactly 2 passing runs satisfy the gate."""
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "wait_for_ci.py",
+            "--commit",
+            "abc",
+            "--component",
+            "all",
+            "--required-workflows",
+            "devcontainer across versions,macos smoke",
+            "--discovery-timeout",
+            "1",
+            "--settle-seconds",
+            "0",
+        ],
+    )
+    r_dev = {
+        "databaseId": 701,
+        "name": "Pytest Local Repo Devcontainer Across Versions",
+        "headSha": "abc",
+        "status": "completed",
+        "conclusion": "success",
+    }
+    r_smoke = {
+        "databaseId": 702,
+        "name": "Pytest Local Repo macOS Smoke",
+        "headSha": "abc",
+        "status": "completed",
+        "conclusion": "success",
+    }
+    runs = [r_dev, r_smoke]
+    with patch("scripts.wait_for_ci.fetch_runs", return_value=runs), patch("time.sleep"):
+        code = wait_ci.main()
+        assert code == 0, "Gatekeeper must proceed without timing out when all required workflows pass!"

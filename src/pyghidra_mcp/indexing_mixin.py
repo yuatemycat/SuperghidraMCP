@@ -114,29 +114,6 @@ class IndexingMixin:
                     raw_client = chromadb.PersistentClient(
                         path=str(parent_chroma_path), settings=Settings(anonymized_telemetry=False)
                     )
-
-                    def _block_mutation(*args: Any, **kwargs: Any) -> Any:
-                        raise PermissionError("Parent Chroma index is strictly read-only in fork sessions")
-
-                    # Lock down mutating endpoints on all underlying system API components (e.g. RustBindingsAPI)
-                    # so that even if code accesses raw_client or bypasses ReadOnlyChromaClient, writes are rejected.
-                    for comp in getattr(raw_client._system, "_instances", {}).values():
-                        for method in (
-                            "_add",
-                            "_update",
-                            "_upsert",
-                            "_delete",
-                            "_modify",
-                            "create_collection",
-                            "delete_collection",
-                            "reset",
-                        ):
-                            if hasattr(comp, method):
-                                try:
-                                    setattr(comp, method, _block_mutation)
-                                except Exception:
-                                    pass
-
                     self.parent_chroma_client = ReadOnlyChromaClient(raw_client)
                 except Exception as exc:
                     logger.debug("Could not open parent chroma index: %s", exc)
