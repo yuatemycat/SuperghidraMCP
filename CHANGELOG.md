@@ -5,7 +5,13 @@ All notable changes to SuperghidraMCP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.4] - 2026-10-31
+
+### Fixed
+- **Orphan Prune Data Loss Protection**: In `prune_forks`, inspect `journal.jsonl` in directories lacking `fork.json`. Preserve directories with unmerged edits under default GC (`include_unmerged=False`), and quarantine expired unmerged directories to `quarantined_orphans/<fork_id>` rather than recursively deleting them.
+- **Stale Lock Cleanup & Failed Session Marking**: Automatically clean up stale Ghidra lock files on fork resume, and mark failed fork sessions explicitly.
+- **Release CI Gatekeeper Hardening**: Enforced `--required-workflows` parameter in `scripts/wait_for_ci.py`, treated non-required cancelled workflows as non-blocking skips, and calibrated minimum expected workflow count to match declared required patterns.
+
 
 ### Added
 - **Chroma Index Isolation in Forks**: Replaced writable directory junctions and symlinks with client-level read-only querying of parent collections via `parent_chroma_client`. Fork modifications (e.g. `import_binary`) and local collection indexes write exclusively to the fork's local `chromadb` directory, preventing fork writes from leaking into the primary project or colliding on SQLite WAL locks. Incomplete parent collections are never deleted or rebuilt by forks.
