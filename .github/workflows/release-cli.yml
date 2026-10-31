@@ -64,7 +64,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          python scripts/wait_for_ci.py --commit "${{ github.sha }}" --component cli
+          python scripts/wait_for_ci.py --commit "${{ github.sha }}" --component cli --required-workflows "cli devcontainer across versions"
 
   build-and-publish:
     name: Build and Publish CLI Package

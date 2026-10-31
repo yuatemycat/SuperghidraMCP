@@ -115,3 +115,37 @@ def test_fork_writes_stay_in_fork_state_dir(tmp_path):
 
     parent_chroma = parent_spec.pyghidra_mcp_dir / "chromadb"
     assert not (parent_chroma / "local_file.txt").exists()
+
+def test_parent_chroma_sqlite_connection_is_read_only(tmp_path):
+    import sqlite3
+
+    import pytest
+    from chromadb.db.impl.sqlite import SqliteDB
+
+    parent_spec = _make_spec(tmp_path, "main_app_ro")
+    parent_chroma = parent_spec.pyghidra_mcp_dir / "chromadb"
+    parent_chroma.mkdir(parents=True, exist_ok=True)
+
+    primary_indexer = _ProbeIndexer(parent_spec.pyghidra_mcp_dir)
+    primary_indexer.chroma_client.create_collection(
+        name="bin_ro",
+        metadata={COLLECTION_COMPLETE_KEY: True},
+    )
+
+    fork_session = create_fork(parent_spec, label="worker_ro")
+    fork_indexer = _ProbeIndexer(
+        fork_session.project_spec.pyghidra_mcp_dir,
+        parent_dir=fork_session.parent_pyghidra_mcp_dir,
+    )
+
+    # 1. Python wrapper raises PermissionError
+    raw_parent = fork_indexer.parent_chroma_client._client
+    with pytest.raises(PermissionError):
+        fork_indexer.parent_chroma_client.create_collection("illegal")
+
+    # 2. Underlying SQLite pool is connected via ?mode=ro URI and blocks direct SQL mutations
+    sqlite_db = raw_parent._system.require(SqliteDB)
+    conn = sqlite_db._conn_pool.connect()
+    with pytest.raises(sqlite3.OperationalError, match=r"(?i)readonly"):
+        conn._conn.execute("INSERT INTO collections (id, name) VALUES ('bad', 'bad')")
+

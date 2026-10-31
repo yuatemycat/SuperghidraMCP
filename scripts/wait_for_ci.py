@@ -118,8 +118,9 @@ def is_target_workflow(name: str, component: str) -> bool:
 
 def main() -> int:
     args = parse_args()
-    min_expected = args.min_runs if args.min_runs is not None else (1 if args.component == "cli" else 2)
     required_patterns = [p.strip().lower() for p in args.required_workflows.split(",") if p.strip()]
+    default_min = max(len(required_patterns), 1 if args.component == "cli" else 3)
+    min_expected = args.min_runs if args.min_runs is not None else default_min
 
     print("=== SuperghidraMCP CI Gatekeeper ===")
     print(f"Repository:         {args.repo}")

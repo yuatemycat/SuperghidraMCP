@@ -696,6 +696,47 @@ def prune_forks(
             try:
                 mtime = child.stat().st_mtime
                 if (time.time() - mtime) > 3600:
+                    # Check whether this orphaned directory contains unmerged journal edits
+                    unmerged_ops = 0
+                    if (child / JOURNAL_FILE).is_file():
+                        journal = read_journal(child)
+                        merge_state = load_merge_state(child)
+                        resolved = merge_state.get("resolved", {})
+                        unmerged_ops = sum(1 for entry in journal if str(entry.get("seq")) not in resolved)
+
+                    if unmerged_ops > 0:
+                        # Safety invariant: Never delete unmerged edits without explicit permission.
+                        if not include_unmerged:
+                            continue
+                        # Even if include_unmerged is enabled, preserve the edit journal by moving the folder aside
+                        age_hours = (time.time() - mtime) / 3600.0
+                        if age_hours < max_age_hours:
+                            continue
+                        quarantine_root = root.parent / "quarantined_orphans"
+                        quarantine_dir = quarantine_root / child.name
+                        if not dry_run:
+                            quarantine_root.mkdir(parents=True, exist_ok=True)
+                            if quarantine_dir.exists():
+                                shutil.rmtree(quarantine_dir, ignore_errors=True)
+                            shutil.move(str(child), str(quarantine_dir))
+                        reclaimed = (
+                            sum(p.stat().st_size for p in quarantine_dir.rglob("*") if p.is_file())
+                            if not dry_run
+                            else sum(p.stat().st_size for p in child.rglob("*") if p.is_file())
+                        )
+                        total_bytes += reclaimed
+                        pruned_summary.append(
+                            {
+                                "fork_id": child.name,
+                                "reason": "orphaned_unmerged_quarantined",
+                                "reclaimed_bytes": reclaimed,
+                                "path": str(child),
+                                "quarantined_to": str(quarantine_dir),
+                                "unmerged_ops": unmerged_ops,
+                            }
+                        )
+                        continue
+
                     orphaned_bytes = sum(p.stat().st_size for p in child.rglob("*") if p.is_file())
                     if not dry_run:
                         shutil.rmtree(child, ignore_errors=True)

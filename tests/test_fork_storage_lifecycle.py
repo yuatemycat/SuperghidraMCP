@@ -529,3 +529,68 @@ def test_create_fork_blocks_and_cleans_up_when_post_copy_quota_exceeded(tmp_path
     all_fork_dirs = list(forks.forks_root(parent.pyghidra_mcp_dir).iterdir())
     assert len(all_fork_dirs) == 1
     assert all_fork_dirs[0] == fork1.fork_dir
+
+def test_prune_forks_preserves_orphaned_directory_with_unmerged_journal(tmp_path):
+    """prune_forks refuses to delete orphaned directory lacking fork.json if journal has unmerged edits."""
+    import os
+    import time
+
+    parent = _make_parent_project(tmp_path)
+    fork = forks.create_fork(parent, label="orphan_with_edits")
+    fork.record("rename_function", "/bin/app", address="1000", old="FUN_1000", new="fork_edit")
+    _stop(fork)
+
+    fork_dir = fork.fork_dir
+    meta_path = fork_dir / forks.FORK_META_FILE
+    assert meta_path.is_file()
+    meta_path.unlink()  # Remove fork.json, turning it into an orphaned directory
+
+    # Backdate mtime to 2 hours ago (> 3600 seconds)
+    stale_mtime = time.time() - 7200
+    os.utime(fork_dir, (stale_mtime, stale_mtime))
+
+    # Standard prune (include_unmerged=False) must NOT delete the orphaned folder or journal
+    res = forks.prune_forks(parent.pyghidra_mcp_dir, dry_run=False, include_unmerged=False)
+    pruned_ids = [p["fork_id"] for p in res["pruned"]]
+    assert fork.fork_id not in pruned_ids
+    assert fork_dir.is_dir()
+    assert (fork_dir / forks.JOURNAL_FILE).is_file()
+    assert len(forks.read_journal(fork_dir)) == 1
+
+    # When include_unmerged=True is explicitly passed, it quarantines aside instead of deleting
+    res_quarantine = forks.prune_forks(
+        parent.pyghidra_mcp_dir, dry_run=False, include_unmerged=True, max_age_hours=1.0
+    )
+    quarantined = [p for p in res_quarantine["pruned"] if p["fork_id"] == fork.fork_id]
+    assert len(quarantined) == 1
+    assert quarantined[0]["reason"] == "orphaned_unmerged_quarantined"
+    assert not fork_dir.exists()
+    quarantine_path = Path(quarantined[0]["quarantined_to"])
+    assert quarantine_path.is_dir()
+    assert (quarantine_path / forks.JOURNAL_FILE).is_file()
+    assert len(forks.read_journal(quarantine_path)) == 1
+
+
+def test_prune_forks_cleans_orphaned_directory_without_edits(tmp_path):
+    """prune_forks deletes orphaned directories older than 1h when they contain no unmerged edits."""
+    import os
+    import time
+
+    parent = _make_parent_project(tmp_path)
+    fork = forks.create_fork(parent, label="orphan_clean")
+    _stop(fork)
+
+    fork_dir = fork.fork_dir
+    meta_path = fork_dir / forks.FORK_META_FILE
+    assert meta_path.is_file()
+    meta_path.unlink()  # Remove fork.json
+
+    # Backdate mtime to 2 hours ago
+    stale_mtime = time.time() - 7200
+    os.utime(fork_dir, (stale_mtime, stale_mtime))
+
+    res = forks.prune_forks(parent.pyghidra_mcp_dir, dry_run=False)
+    pruned_ids = [p["fork_id"] for p in res["pruned"]]
+    assert fork.fork_id in pruned_ids
+    assert not fork_dir.exists()
+
