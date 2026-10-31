@@ -530,6 +530,7 @@ def test_create_fork_blocks_and_cleans_up_when_post_copy_quota_exceeded(tmp_path
     assert len(all_fork_dirs) == 1
     assert all_fork_dirs[0] == fork1.fork_dir
 
+
 def test_prune_forks_preserves_orphaned_directory_with_unmerged_journal(tmp_path):
     """prune_forks refuses to delete orphaned directory lacking fork.json if journal has unmerged edits."""
     import os
@@ -558,9 +559,7 @@ def test_prune_forks_preserves_orphaned_directory_with_unmerged_journal(tmp_path
     assert len(forks.read_journal(fork_dir)) == 1
 
     # When include_unmerged=True is explicitly passed, it quarantines aside instead of deleting
-    res_quarantine = forks.prune_forks(
-        parent.pyghidra_mcp_dir, dry_run=False, include_unmerged=True, max_age_hours=1.0
-    )
+    res_quarantine = forks.prune_forks(parent.pyghidra_mcp_dir, dry_run=False, include_unmerged=True, max_age_hours=1.0)
     quarantined = [p for p in res_quarantine["pruned"] if p["fork_id"] == fork.fork_id]
     assert len(quarantined) == 1
     assert quarantined[0]["reason"] == "orphaned_unmerged_quarantined"
@@ -593,4 +592,3 @@ def test_prune_forks_cleans_orphaned_directory_without_edits(tmp_path):
     pruned_ids = [p["fork_id"] for p in res["pruned"]]
     assert fork.fork_id in pruned_ids
     assert not fork_dir.exists()
-

@@ -114,18 +114,6 @@ class IndexingMixin:
                     raw_client = chromadb.PersistentClient(
                         path=str(parent_chroma_path), settings=Settings(anonymized_telemetry=False)
                     )
-                    # Enforce true SQLite driver-level read-only connection (mode=ro URI)
-                    try:
-                        from chromadb.db.impl.sqlite import SqliteDB
-
-                        sqlite_db = raw_client._system.require(SqliteDB)
-                        sqlite_file = (parent_chroma_path / "chroma.sqlite3").as_posix()
-                        sqlite_db._conn_pool.close()
-                        sqlite_db._conn_pool._db_file = f"file:{sqlite_file}?mode=ro"
-                        sqlite_db._conn_pool._is_uri = True
-                    except Exception as ro_err:
-                        logger.debug("Could not switch parent chroma connection to read-only URI: %s", ro_err)
-
                     self.parent_chroma_client = ReadOnlyChromaClient(raw_client)
                 except Exception as exc:
                     logger.debug("Could not open parent chroma index: %s", exc)

@@ -27,6 +27,8 @@ on:
       - '.github/workflows/pytest-devcontainer-repo-cli.yml'
   schedule:
     - cron: '30 5,15 * * *'
+  release:
+    types: [published]
   workflow_dispatch:
 
 jobs:

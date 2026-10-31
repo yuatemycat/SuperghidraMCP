@@ -116,11 +116,9 @@ def test_fork_writes_stay_in_fork_state_dir(tmp_path):
     parent_chroma = parent_spec.pyghidra_mcp_dir / "chromadb"
     assert not (parent_chroma / "local_file.txt").exists()
 
-def test_parent_chroma_sqlite_connection_is_read_only(tmp_path):
-    import sqlite3
 
+def test_parent_chroma_client_raises_permission_error_on_mutation(tmp_path):
     import pytest
-    from chromadb.db.impl.sqlite import SqliteDB
 
     parent_spec = _make_spec(tmp_path, "main_app_ro")
     parent_chroma = parent_spec.pyghidra_mcp_dir / "chromadb"
@@ -138,14 +136,17 @@ def test_parent_chroma_sqlite_connection_is_read_only(tmp_path):
         parent_dir=fork_session.parent_pyghidra_mcp_dir,
     )
 
-    # 1. Python wrapper raises PermissionError
-    raw_parent = fork_indexer.parent_chroma_client._client
-    with pytest.raises(PermissionError):
+    # 1. Client mutations raise PermissionError
+    with pytest.raises(PermissionError, match=r"read-only"):
         fork_indexer.parent_chroma_client.create_collection("illegal")
 
-    # 2. Underlying SQLite pool is connected via ?mode=ro URI and blocks direct SQL mutations
-    sqlite_db = raw_parent._system.require(SqliteDB)
-    conn = sqlite_db._conn_pool.connect()
-    with pytest.raises(sqlite3.OperationalError, match=r"(?i)readonly"):
-        conn._conn.execute("INSERT INTO collections (id, name) VALUES ('bad', 'bad')")
+    with pytest.raises(PermissionError, match=r"read-only"):
+        fork_indexer.parent_chroma_client.delete_collection("bin_ro")
 
+    # 2. Collection mutations raise PermissionError
+    col = fork_indexer.parent_chroma_client.get_collection("bin_ro")
+    with pytest.raises(PermissionError, match=r"read-only"):
+        col.add(ids=["illegal"], documents=["dummy"])
+
+    with pytest.raises(PermissionError, match=r"read-only"):
+        col.delete(ids=["illegal"])
